@@ -2,7 +2,7 @@
 
 浏览 Telegram 频道附件，试看视频，把选中的文件批量保存到指定目录。
 
-[下载 macOS 版](https://github.com/TNT-Likely/telegram-nestfetch/releases/latest) · [English](README.md)
+[下载 macOS、Windows 或 Linux 版](https://github.com/TNT-Likely/telegram-nestfetch/releases/latest) · [English](README.md)
 
 ![频道附件页面，可按日期和类型筛选，并勾选要下载的文件](docs/media/channel-attachments.png)
 
@@ -24,18 +24,20 @@
 
 ## 安装和登录
 
-1. 下载适用于 macOS 13 或更新版本的 DMG。Apple 芯片选择 `aarch64.dmg`，Intel 芯片选择 `x64.dmg`。[最新版本](https://github.com/TNT-Likely/telegram-nestfetch/releases/latest)
-2. 打开 DMG，将 **TG NestFetch** 拖入「应用程序」。应用采用临时签名。如果系统拦截首次启动，可以先尝试打开应用，再到「系统设置 → 隐私与安全性」选择「仍要打开」。[Apple 支持](https://support.apple.com/guide/mac-help/open-a-mac-app-from-an-unidentified-developer-mh40616/mac)
-3. 在应用中打开登录二维码，再用手机 Telegram 的「设置 → 设备 → 连接桌面设备」扫码。开启两步验证的账号按提示输入密码。
+按操作系统选择安装包。[最新版本](https://github.com/TNT-Likely/telegram-nestfetch/releases/latest)
+
+| 平台 | 安装包 |
+| --- | --- |
+| macOS 13 或更新版本 | Apple 芯片选 `aarch64.dmg`，Intel 芯片选 `x64.dmg` |
+| Windows 10/11（x64） | `x64-setup.exe` |
+| Linux（x86-64） | `amd64.deb` 或 `amd64.AppImage`，基于 Ubuntu 22.04 构建 |
+
+- **macOS** · 打开 DMG，将 **TG NestFetch** 拖入「应用程序」。应用采用临时签名。如果系统拦截首次启动，可以先尝试打开应用，再到「系统设置 → 隐私与安全性」选择「仍要打开」。[Apple 支持](https://support.apple.com/guide/mac-help/open-a-mac-app-from-an-unidentified-developer-mh40616/mac)
+- **Windows** · 运行 `.exe` 安装包。安装包未签名，如果系统缺少 WebView2，安装时会联网下载。
+- **Linux** · 用 `sudo apt install ./<文件名>.deb` 安装 DEB，或用 `chmod +x <文件名>.AppImage` 添加执行权限后运行 AppImage。
+
+在应用中打开登录二维码，再用手机 Telegram 的「设置 → 设备 → 连接桌面设备」扫码。开启两步验证的账号按提示输入密码。
 
 安装包内置 [tdl](https://github.com/iyear/tdl)，使用独立的 Telegram 会话。当前下载完成或暂停后开始试看，关闭播放器后队列继续。恢复中断的 tdl 下载会重新传输该文件。文件传输完成后如果保存目录离线，则保留在本机暂存区，之后可以重试保存或选择其他目录。
-
-## 平台支持
-
-| 平台 | 当前支持 |
-| --- | --- |
-| macOS | Apple 芯片和 Intel 安装包，需要 macOS 13 或更新版本 |
-| Windows | 已配置 NSIS 构建目标 |
-| Linux | 已配置 DEB 和 AppImage 构建目标 |
 
 开发、构建与许可证信息见英文说明。[Build from source](README.md#build-from-source) · [License](README.md#license)

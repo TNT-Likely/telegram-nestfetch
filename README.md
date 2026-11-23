@@ -2,7 +2,7 @@
 
 Browse Telegram channels, preview videos, and batch-download attachments to a folder you choose.
 
-[Download for macOS](https://github.com/TNT-Likely/telegram-nestfetch/releases/latest) · [简体中文](README.zh-CN.md)
+[Download for macOS, Windows, or Linux](https://github.com/TNT-Likely/telegram-nestfetch/releases/latest) · [简体中文](README.zh-CN.md)
 
 ![TG NestFetch showing a channel's attachments with date and type filters and selected files ready to download](docs/media/channel-attachments.png)
 
@@ -25,25 +25,29 @@ The demo uses an example channel and a sample video from MDN. [Sample video](htt
 <a name="install-and-use"></a>
 <a name="安装与使用"></a>
 
-## Install on macOS
+## Install and sign in
 
-1. Download the DMG for macOS 13 or later. Choose `aarch64.dmg` for Apple silicon or `x64.dmg` for Intel. [Latest release](https://github.com/TNT-Likely/telegram-nestfetch/releases/latest)
-2. Open the DMG and drag **TG NestFetch** to **Applications**. The app uses an ad hoc signature. If macOS blocks the first launch, try opening the app once, then choose **Open Anyway** in **System Settings → Privacy & Security**. [Apple support](https://support.apple.com/guide/mac-help/open-a-mac-app-from-an-unidentified-developer-mh40616/mac)
-3. In TG NestFetch, choose **Sign in with QR code**. On your phone, open **Telegram → Settings → Devices → Link Desktop Device** and scan the code. Enter your two-step verification password if prompted.
+Download the package for your computer. [Latest release](https://github.com/TNT-Likely/telegram-nestfetch/releases/latest)
+
+| Platform | Package |
+| --- | --- |
+| macOS 13+ | `aarch64.dmg` for Apple silicon or `x64.dmg` for Intel |
+| Windows 10/11 (x64) | `x64-setup.exe` |
+| Linux (x86-64) | `amd64.deb` or `amd64.AppImage`, built on Ubuntu 22.04 |
+
+<a name="install-on-macos"></a>
+
+- **macOS** · Open the DMG and drag **TG NestFetch** to **Applications**. The app carries an ad hoc signature. If macOS blocks the first launch, try opening the app once, then choose **Open Anyway** in **System Settings → Privacy & Security**. [Apple support](https://support.apple.com/guide/mac-help/open-a-mac-app-from-an-unidentified-developer-mh40616/mac)
+- **Windows** · Run the setup `.exe`. The installer is unsigned and downloads WebView2 if the runtime is missing.
+- **Linux** · Install the `.deb` with `sudo apt install ./<filename>.deb`, or run `chmod +x <filename>.AppImage` and open the AppImage.
+
+In TG NestFetch, choose **Sign in with QR code**. On your phone, open **Telegram → Settings → Devices → Link Desktop Device** and scan the code. Enter your two-step verification password if prompted.
 
 The app bundles [tdl](https://github.com/iyear/tdl) and uses a separate Telegram session. A preview waits for the current transfer to finish or pause, and closing the player lets the queue continue. Resuming an interrupted tdl download restarts that file. A finished transfer stays in local staging when its destination is unavailable, so you can retry saving it or choose another folder.
 
-## Platform support
-
-| Platform | Current support |
-| --- | --- |
-| macOS | DMG for Apple silicon and Intel, macOS 13 or later |
-| Windows | NSIS build target |
-| Linux | DEB and AppImage build targets |
-
 ## Build from source
 
-The build workflow uses Node.js 24, Go 1.27, and stable Rust. Install the system dependencies for your platform. [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/)
+The build workflow uses Node.js 24, Go 1.27, and stable Rust. Install the system dependencies for your platform. On Linux, also install `gstreamer1.0-plugins-good` and `gstreamer1.0-libav` for video playback. [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/)
 
 ```sh
 npm ci
