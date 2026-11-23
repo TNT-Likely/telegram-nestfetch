@@ -14,9 +14,9 @@ import (
 )
 
 type tdlTerminal struct {
-	output      io.ReadCloser
-	write       func([]byte) (int, error)
-	interactive bool
+	output             io.ReadCloser
+	write              func([]byte) (int, error)
+	passwordTerminator byte
 }
 
 type tdlLoginEvent struct {

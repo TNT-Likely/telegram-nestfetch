@@ -34,7 +34,7 @@
 
 - **macOS** · 打开 DMG，将 **TG NestFetch** 拖入「应用程序」。应用采用临时签名。如果系统拦截首次启动，可以先尝试打开应用，再到「系统设置 → 隐私与安全性」选择「仍要打开」。[Apple 支持](https://support.apple.com/guide/mac-help/open-a-mac-app-from-an-unidentified-developer-mh40616/mac)
 - **Windows** · 运行 `.exe` 安装包。安装包未签名，如果系统缺少 WebView2，安装时会联网下载。
-- **Linux** · 用 `sudo apt install ./<文件名>.deb` 安装 DEB，或用 `chmod +x <文件名>.AppImage` 添加执行权限后运行 AppImage。
+- **Linux** · 在下载目录用 `sudo apt install ./TG-NestFetch_*_amd64.deb` 安装 DEB。也可以用 `chmod +x TG-NestFetch_*_amd64.AppImage` 添加执行权限，再用 `./TG-NestFetch_*_amd64.AppImage` 启动。
 
 在应用中打开登录二维码，再用手机 Telegram 的「设置 → 设备 → 连接桌面设备」扫码。开启两步验证的账号按提示输入密码。
 

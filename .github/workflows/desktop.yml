@@ -68,8 +68,6 @@ jobs:
         run: xcrun swift scripts/test-video-frame.swift src-tauri/resources/tg-nestfetch-frame scripts/testdata/red-blue-vp9.webm
       - name: Build Windows and Linux installers
         if: runner.os != 'macOS'
-        env:
-          APPIMAGE_EXTRACT_AND_RUN: '1'
         run: npm run build -- --target ${{ matrix.target }}
       - name: Smoke-test Windows installation
         if: runner.os == 'Windows'

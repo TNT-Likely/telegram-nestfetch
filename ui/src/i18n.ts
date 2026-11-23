@@ -307,7 +307,6 @@ const errors: Record<string, readonly [zh: string, en: string]> = {
   telegram_rate_limited: ['Telegram 暂时限制了请求，请稍后重试。', 'Telegram has temporarily limited requests. Try again later.'],
   telegram_network: ['无法连接 Telegram，请检查网络。', 'Could not connect to Telegram. Check your network connection.'],
   tdl_unavailable: ['无法启动 TDL 下载组件，请重新安装 TG NestFetch。', 'Could not start the TDL component. Reinstall TG NestFetch.'],
-  tdl_password_unsupported: ['此平台上的 TDL 暂无法处理 Telegram 两步验证。', 'TDL cannot complete Telegram two-step verification on this platform.'],
   telegram_error: ['Telegram 暂时无法完成请求，请重试。', 'Telegram could not complete the request. Try again.'],
   session_expired: ['Telegram 会话已过期，请重新登录。', 'The Telegram session expired. Sign in again.'],
   access_denied: ['当前账号无权访问这条消息。', 'Your account cannot access this message.'],

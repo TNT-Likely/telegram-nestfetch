@@ -244,9 +244,9 @@ func (p *tdlProvider) updateTDLLogin(login *tdlLogin, event tdlLoginEvent) {
 		return
 	}
 	if event.password {
-		if !login.terminal.interactive {
-			login.failure = telegramFailure("tdl_password_unsupported")
-			login.cancel()
+		if login.terminal.passwordTerminator == '\n' {
+			login.password = true
+			p.account = tdlAccount("password")
 			return
 		}
 		login.prompt = true
@@ -289,7 +289,7 @@ func (p *tdlProvider) SubmitPassword(password string) error {
 	login.password = false
 	p.mu.Unlock()
 
-	line := append([]byte(password), '\r')
+	line := append([]byte(password), login.terminal.passwordTerminator)
 	defer clear(line)
 	if n, err := login.terminal.write(line); err != nil || n != len(line) {
 		return telegramFailure("login_not_pending")

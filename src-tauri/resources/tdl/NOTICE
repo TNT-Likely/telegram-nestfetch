@@ -2,9 +2,10 @@ tdl v0.20.4 by iyear and contributors
 https://github.com/iyear/tdl/releases/tag/v0.20.4
 
 TG NestFetch runs a separately compiled tdl command-line utility. This build
-is identified as 0.20.4-nestfetch.3, modified by TG NestFetch on 2026-11-23.
+is identified as 0.20.4-nestfetch.4, modified by TG NestFetch on 2026-11-23.
 Changes include gotd v0.165.1 for cross-DC QR sign-in, channel attachment
-pagination, validation for empty photo sizes, and local video playback with transfer metrics.
+pagination, validation for empty photo sizes, local video playback with transfer metrics,
+and reading the QR sign-in password from stdin for desktop apps without a terminal.
 
 tdl is distributed under the GNU Affero General Public License, version 3.
 This directory includes its LICENSE, the upstream source archive for commit
@@ -14,7 +15,7 @@ Extract the archive and run the following from its root, replacing /path/to/tdl
 with the path to this resource directory.
 
     git apply --unidiff-zero /path/to/tdl/qr-login.patch
-    git apply /path/to/tdl/photo-sizes.patch /path/to/tdl/channel-attachments.patch /path/to/tdl/private-preview.patch
+    git apply /path/to/tdl/photo-sizes.patch /path/to/tdl/channel-attachments.patch /path/to/tdl/private-preview.patch /path/to/tdl/qr-password-stdin.patch
     mkdir -p internal/nestfetchpreview
     cp /path/to/tdl/nestfetch-preview-stream.go internal/nestfetchpreview/stream.go
     CGO_ENABLED=0 go build -mod=readonly

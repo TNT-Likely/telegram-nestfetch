@@ -34,5 +34,5 @@ func startTDLTerminal(cmd *exec.Cmd) (tdlTerminal, error) {
 		master.Close()
 		return tdlTerminal{}, err
 	}
-	return tdlTerminal{output: master, write: master.Write, interactive: true}, nil
+	return tdlTerminal{output: master, write: master.Write, passwordTerminator: '\r'}, nil
 }

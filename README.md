@@ -39,7 +39,7 @@ Download the package for your computer. [Latest release](https://github.com/TNT-
 
 - **macOS** · Open the DMG and drag **TG NestFetch** to **Applications**. The app carries an ad hoc signature. If macOS blocks the first launch, try opening the app once, then choose **Open Anyway** in **System Settings → Privacy & Security**. [Apple support](https://support.apple.com/guide/mac-help/open-a-mac-app-from-an-unidentified-developer-mh40616/mac)
 - **Windows** · Run the setup `.exe`. The installer is unsigned and downloads WebView2 if the runtime is missing.
-- **Linux** · Install the `.deb` with `sudo apt install ./<filename>.deb`, or run `chmod +x <filename>.AppImage` and open the AppImage.
+- **Linux** · From the download directory, install with `sudo apt install ./TG-NestFetch_*_amd64.deb`. To run the AppImage, give it execute permission with `chmod +x TG-NestFetch_*_amd64.AppImage` and then run `./TG-NestFetch_*_amd64.AppImage`.
 
 In TG NestFetch, choose **Sign in with QR code**. On your phone, open **Telegram → Settings → Devices → Link Desktop Device** and scan the code. Enter your two-step verification password if prompted.
 
