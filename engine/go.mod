@@ -5,6 +5,7 @@ go 1.26.0
 require (
 	github.com/AlecAivazis/survey/v2 v2.3.7
 	github.com/creack/pty v1.1.24
+	github.com/gotd/neo v0.1.5
 	github.com/gotd/td v0.165.1
 	golang.org/x/sys v0.47.0
 	golang.org/x/term v0.45.0
@@ -27,7 +28,6 @@ require (
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gotd/ige v0.3.0 // indirect
 	github.com/gotd/log v0.1.0 // indirect
-	github.com/gotd/neo v0.1.5 // indirect
 	github.com/kballard/go-shellquote v0.0.0-20180428030007-95032a82bc51 // indirect
 	github.com/klauspost/compress v1.19.2 // indirect
 	github.com/mattn/go-colorable v0.1.15 // indirect

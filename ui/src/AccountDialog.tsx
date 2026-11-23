@@ -113,10 +113,11 @@ export function AccountDialog({
   const title = setup ? t('configure') : connected ? (confirming ? t(tdl ? 'confirmDisconnectTdl' : 'confirmSignOut') : t('account'))
     : account.state === 'password' ? t('passwordTitle')
       : account.state === 'starting' || account.state === 'qr' ? t('qrTitle') : t('connect');
-  const shownError = credentialsError ? { code: 'config_invalid' } : failure || (!editing ? account.error : undefined);
+  const shownError: Failure | undefined = credentialsError ? { code: 'config_invalid' } : failure || (!editing ? account.error : undefined);
   const message = shownError && (
     <p className="dialog-error" role="alert">
       {tdl && shownError.code === 'password_invalid' ? t('tdlPasswordRetry') : failureText(language, shownError.code)}
+      {tdl && shownError.message && /^[A-Z][A-Z0-9_]{2,63}$/.test(shownError.message) && <> <code>{shownError.message}</code></>}
     </p>
   );
 

@@ -24,7 +24,7 @@ if (!goArch || !goOS || (goOS === 'darwin' && process.platform !== 'darwin')) {
 const tauri = path.join(root, 'src-tauri');
 const binaries = path.join(tauri, 'binaries');
 mkdirSync(binaries, { recursive: true });
-prepareTdl(tauri, target);
+prepareTdl(tauri, target, goOS === 'win32' ? 'windows' : goOS, goArch);
 const output = path.join(binaries, 'nestfetch-engine-' + target + (goOS === 'win32' ? '.exe' : ''));
 const engine = path.join(root, 'engine');
 const args = ['build', '-mod=readonly', '-trimpath', '-ldflags=-s -w', '-o', output];

@@ -7,7 +7,7 @@ Paste a Telegram message link and save the video to a folder you choose. TG Nest
 ## 安装与使用
 
 1. 从 [GitHub Releases](https://github.com/TNT-Likely/telegram-nestfetch/releases) 下载 macOS 13 或更新版本对应的 DMG。Apple 芯片使用 `aarch64`，Intel 芯片使用 `x64`。打开 DMG，将应用拖入「应用程序」。
-2. 从 v0.1.1 起，安装包自带 tdl。点「打开登录二维码」，用手机 Telegram 的「设置 → 设备 → 连接桌面设备」扫码即可。开启两步验证时，在应用内输入 Telegram 密码。应用使用独立会话，首次使用无需申请 API ID 和 API Hash。
+2. 从 v0.1.2 起，安装包自带 tdl。点「打开登录二维码」，用手机 Telegram 的「设置 → 设备 → 连接桌面设备」扫码即可。开启两步验证时，在应用内输入 Telegram 密码。应用使用独立会话，首次使用无需申请 API ID 和 API Hash。
 3. 粘贴可访问的视频消息链接并下载。默认保存到「下载」，可选择本地目录或已挂载的网络目录。
 
 当前 macOS 安装包采用临时签名。若 Gatekeeper 在首次启动时阻止打开，可在尝试启动后通过「系统设置 → 隐私与安全性 → 仍要打开」允许这一个应用。 [Apple 支持文档](https://support.apple.com/guide/mac-help/open-a-mac-app-from-an-unidentified-developer-mh40616/mac)
@@ -15,7 +15,7 @@ Paste a Telegram message link and save the video to a folder you choose. TG Nest
 ## Install and use
 
 1. Download the macOS 13+ DMG from [Releases](https://github.com/TNT-Likely/telegram-nestfetch/releases). Choose `aarch64` for Apple silicon or `x64` for an Intel Mac. Open the DMG and drag the app to Applications.
-2. Version 0.1.1 bundles tdl and uses a separate Telegram session. Select **Sign in with QR code** and scan it on your phone from Telegram → Settings → Devices → Link Desktop Device. Enter your Telegram password in the app if two-step verification is enabled. The bundled client handles the application credentials.
+2. Version 0.1.2 bundles tdl and uses a separate Telegram session. Select **Sign in with QR code** and scan it on your phone from Telegram → Settings → Devices → Link Desktop Device. Enter your Telegram password in the app if two-step verification is enabled. The bundled client handles the application credentials.
 3. Paste an accessible video message link and start the download. The default destination is Downloads. You can choose a local folder or a mounted network folder.
 
 The macOS bundles are ad hoc signed. If Gatekeeper blocks the first launch, try opening the app once, then use System Settings → Privacy & Security → Open Anyway for this app. [Apple support](https://support.apple.com/guide/mac-help/open-a-mac-app-from-an-unidentified-developer-mh40616/mac)
@@ -44,7 +44,7 @@ cd engine
 go test -mod=readonly ./...
 ```
 
-Run `npm run build` from the project root to produce a local bundle. The build downloads tdl v0.20.4 for the selected platform and verifies the archive against its pinned SHA-256. The installed app includes the executable, license, and corresponding source archive. The Go sidecar manages the local queue and runs tdl with its own data directory and Telegram session. [Upstream tdl release](https://github.com/iyear/tdl/releases/tag/v0.20.4)
+Run `npm run build` from the project root to produce a local bundle. The build verifies the upstream tdl v0.20.4 source archive against a pinned SHA-256 and compiles it with gotd v0.165.1 for QR sign-in across data centers. The installed app includes the executable, license, upstream source archive, and build patch. The Go sidecar manages the local queue and runs tdl with its own data directory and Telegram session. [Upstream tdl release](https://github.com/iyear/tdl/releases/tag/v0.20.4)
 
 Existing installations with saved API credentials continue using their gotd session. To build with your own registered Telegram application, set `TG_NESTFETCH_TELEGRAM_APP_FILE` to the path of a private JSON file containing a numeric `apiId` and a string `apiHash`. The build embeds those credentials in the Go sidecar and keeps the input file out of the checkout. [Telegram developer tools](https://my.telegram.org/apps)
 

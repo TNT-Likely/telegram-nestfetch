@@ -209,7 +209,7 @@ func (p *telegramProvider) start(restore bool) {
 		Device: telegram.DeviceConfig{
 			DeviceModel:   "TG NestFetch",
 			SystemVersion: runtime.GOOS + "/" + runtime.GOARCH,
-			AppVersion:    "0.1.1",
+			AppVersion:    "0.1.2",
 		},
 		DialTimeout:  8 * time.Second,
 		FilePoolSize: 2,

@@ -7,12 +7,35 @@ import (
 	"io/fs"
 	"os"
 	"os/exec"
+	"regexp"
 	"runtime"
 	"strings"
 	"time"
 )
 
 const tdlNamespace = "nestfetch"
+
+var tdlRPCCode = regexp.MustCompile(`\b(?i:rpc error code) [0-9]{3}: ([A-Z][A-Z0-9_]{2,63})\b`)
+
+// Save only a protocol error identifier or a known stage. A later stack trace
+// can push the original error out of the bounded terminal buffer.
+func tdlLoginIssue(line string) *Failure {
+	lower := strings.ToLower(line)
+	if match := tdlRPCCode.FindStringSubmatch(line); match != nil {
+		failure := transferFailure(tdlCommandFailure(context.Background(), errors.New("tdl login"), line))
+		failure.Message = match[1]
+		return failure
+	}
+	switch {
+	case strings.Contains(lower, "migration to ") && strings.Contains(lower, " needed"):
+		return &Failure{Code: "tdl_login_migration", Message: "DC_MIGRATION"}
+	case strings.Contains(lower, "unexpected type *tg.authlogintoken"):
+		return &Failure{Code: "tdl_login_response", Message: "UNEXPECTED_LOGIN_TOKEN"}
+	case strings.Contains(lower, "unexpected constructor") || strings.Contains(lower, "unknown constructor"):
+		return &Failure{Code: "tdl_login_response", Message: "UNKNOWN_CONSTRUCTOR"}
+	}
+	return nil
+}
 
 // tdlCommand only starts the separately installed or bundled upstream
 // executable with an app-owned home and namespace. The relative storage path
@@ -66,6 +89,10 @@ func tdlCommandFailure(ctx context.Context, runErr error, output string) error {
 		return nil
 	}
 	switch {
+	case tdlIncludes(lower, "auth_token_expired", "auth_token_invalid", "auth_token_already_accepted"):
+		return telegramFailure("tdl_login_token_invalid")
+	case tdlIncludes(lower, "update_app_to_login"):
+		return telegramFailure("tdl_login_response")
 	case tdlIncludes(lower, "password_hash_invalid", "password is invalid", "invalid password", "password invalid"):
 		return telegramFailure("password_invalid")
 	case tdlIncludes(lower, "api_id_invalid", "api_id_published_flood", "api_hash_invalid"):

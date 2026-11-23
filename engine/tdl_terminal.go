@@ -29,6 +29,7 @@ type tdlLoginResult struct {
 	accepted bool
 	label    string
 	output   string
+	issue    *Failure
 }
 
 const (
@@ -81,6 +82,9 @@ func readTDLLoginOutput(source io.Reader, publish func(tdlLoginEvent)) tdlLoginR
 			return
 		}
 		if value != "" {
+			if issue := tdlLoginIssue(value); issue != nil {
+				result.issue = issue
+			}
 			result.output += value + "\n"
 			if len(result.output) > tdlMaxConsoleLine {
 				result.output = result.output[len(result.output)-tdlMaxConsoleLine:]

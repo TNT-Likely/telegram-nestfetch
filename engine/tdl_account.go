@@ -185,19 +185,32 @@ func (p *tdlProvider) runTDLLogin(login *tdlLogin) {
 	}
 	_ = login.terminal.output.Close()
 
+	err := tdlCommandFailure(login.ctx, runErr, result.output)
+	if login.ctx.Err() == nil && result.issue == nil && (!result.accepted || err != nil) &&
+		(err == nil || result.accepted || transferFailure(err).Code == "telegram_error") {
+		// Verify an ambiguous terminal result with an authenticated tdl command.
+		// Its field-list mode returns before resolving a chat or reading messages.
+		check, cancel := context.WithTimeout(login.ctx, 12*time.Second)
+		if p.tdlCommand(check, "chat", "export", "--filter", "-").Run() == nil {
+			result.accepted = true
+			err = nil
+		}
+		cancel()
+	}
 	p.mu.Lock()
 	if p.login != login {
 		p.mu.Unlock()
 		return
 	}
 
-	err := tdlCommandFailure(login.ctx, runErr, result.output)
 	var failure *Failure
 	switch {
 	case login.failure != nil:
 		failure = login.failure
 	case errors.Is(err, context.DeadlineExceeded):
 		failure = telegramFailure("telegram_network")
+	case result.issue != nil && (err != nil || !result.accepted):
+		failure = result.issue
 	case errors.As(err, &failure):
 	case err != nil || !result.accepted:
 		failure = telegramFailure("telegram_error")
@@ -207,6 +220,7 @@ func (p *tdlProvider) runTDLLogin(login *tdlLogin) {
 
 	p.login = nil
 	if failure == nil {
+		_ = os.Remove(filepath.Join(p.dir, "last-login-error.json"))
 		p.account = tdlAccount("connected")
 		p.account.Label = result.label
 		p.mu.Unlock()
@@ -214,6 +228,11 @@ func (p *tdlProvider) runTDLLogin(login *tdlLogin) {
 	}
 	p.account = tdlAccount("error")
 	p.account.Error = failure
+	// The record contains application-defined codes and an optional Telegram
+	// RPC identifier. Never persist terminal text, QR data, or account details.
+	_ = writePrivateFile(filepath.Join(p.dir, "last-login-error.json"), func(w io.Writer) error {
+		return json.NewEncoder(w).Encode(failure)
+	})
 	_ = p.clearTDLStorage()
 	p.mu.Unlock()
 }
