@@ -41,9 +41,13 @@ function duration(seconds: number) {
 
 function useCover(id: string, hasThumbnail: boolean) {
   const element = useRef<HTMLDivElement>(null);
-  const [cover, setCover] = useState<string>();
+  const [loaded, setLoaded] = useState<{ id: string; source: string }>();
   useEffect(() => {
-    if (!hasThumbnail || !element.current) return;
+    if (!hasThumbnail) {
+      setLoaded(undefined);
+      return;
+    }
+    if (!element.current) return;
     let disposed = false;
     let attempts = 0;
     let timer: number | undefined;
@@ -53,7 +57,7 @@ function useCover(id: string, hasThumbnail: boolean) {
         const source = imageSource(await request('thumbnail', { id }));
         if (disposed) return;
         if (source) {
-          setCover(source);
+          setLoaded({ id, source });
           return;
         }
       } catch {
@@ -74,7 +78,7 @@ function useCover(id: string, hasThumbnail: boolean) {
       window.clearTimeout(timer);
     };
   }, [id, hasThumbnail]);
-  return { element, cover };
+  return { element, cover: hasThumbnail && loaded?.id === id ? loaded.source : undefined };
 }
 
 function MediaImage({ cover }: { cover?: string }) {

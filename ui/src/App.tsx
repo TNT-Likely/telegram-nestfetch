@@ -131,6 +131,15 @@ function ProjectMark() {
   return <span className="brand-mark" aria-hidden="true" />;
 }
 
+function ProductName({ t }: { t: Translate }) {
+  return (
+    <span className="product-name">
+      <strong>TG NestFetch</strong>
+      <small title={t('appVersion')}>v{import.meta.env.VITE_APP_VERSION}</small>
+    </span>
+  );
+}
+
 interface SidebarProps {
   view: View;
   jobs: Job[];
@@ -145,7 +154,7 @@ function Sidebar({ view, jobs, account, t, onView, onAccount }: SidebarProps) {
     <aside className="sidebar">
       <div className="identity">
         <ProjectMark />
-        <strong>TG NestFetch</strong>
+        <ProductName t={t} />
         <span>{t('subtitle')}</span>
       </div>
       <nav aria-label={t('filters')}>
@@ -302,7 +311,7 @@ export function App() {
       <Sidebar view={view} jobs={jobs} account={account} t={t} onView={setView} onAccount={openAccount} />
       <main className="workspace">
         <header className="top-bar">
-          <div className="compact-brand"><ProjectMark /><strong>TG NestFetch</strong></div>
+          <div className="compact-brand"><ProjectMark /><ProductName t={t} /></div>
           <div className="preferences">
             <div className="switch" role="group" aria-label={t('appearance')}>
               {appearanceChoices.map(({ key, Icon }) => (

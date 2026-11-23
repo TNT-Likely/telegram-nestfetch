@@ -24,7 +24,7 @@ func (q *queue) thumbnailPath(id string) string {
 func (q *queue) thumbnail(id string) (any, error) {
 	q.mu.Lock()
 	entry := q.byIDLocked(id)
-	fetch := entry != nil && entry.HasThumbnail
+	fetch := entry != nil && entry.HasThumbnail && !entry.HideThumbnail
 	q.mu.Unlock()
 	if entry == nil {
 		return nil, &Failure{Code: "not_found"}
@@ -106,16 +106,19 @@ func (q *queue) extractThumbnail(ctx context.Context, entry queueEntry) bool {
 	// Give native decoders an extension. Creating a hard link here never
 	// duplicates a large video, and the temporary aliases are app-owned.
 	input := filepath.Join(filepath.Dir(part), "frame-source"+ext)
-	output := filepath.Join(filepath.Dir(part), "frame.jpg")
-	if input == output {
-		output += ".jpg"
-	}
 	_ = os.Remove(input)
-	_ = os.Remove(output)
 	if err := os.Link(part, input); err != nil {
 		return false
 	}
 	defer os.Remove(input)
+	return q.saveVideoFrame(ctx, entry.ID, input)
+}
+
+func (q *queue) saveVideoFrame(ctx context.Context, id, input string) bool {
+	// Inputs can live on a read-only volume. All generated files stay in
+	// the app's private cache, regardless of the selected download folder.
+	output := filepath.Join(q.dataDir, "thumbnails", id+".frame.jpg")
+	_ = os.Remove(output)
 	defer os.Remove(output)
 	timeout, cancel := context.WithTimeout(ctx, 12*time.Second)
 	defer cancel()
@@ -126,5 +129,61 @@ func (q *queue) extractThumbnail(ctx context.Context, entry queueEntry) bool {
 	if err != nil {
 		return false
 	}
-	return q.saveThumbnail(entry.ID, "data:image/jpeg;base64,"+base64.StdEncoding.EncodeToString(data))
+	return q.saveThumbnail(id, "data:image/jpeg;base64,"+base64.StdEncoding.EncodeToString(data))
+}
+
+// Called before the download worker starts and before the queue is exposed to IPC.
+func (q *queue) startThumbnailRecovery() {
+	if q.frameHelper == "" {
+		return
+	}
+	var pending []*queueEntry
+	for i := len(q.state.Jobs) - 1; i >= 0; i-- {
+		entry := q.state.Jobs[i]
+		if entry.State == completed && !entry.HasThumbnail && !entry.HideThumbnail && entry.OutputPath != "" && entry.Size > 0 {
+			pending = append(pending, entry)
+		}
+	}
+	if len(pending) > 0 {
+		q.workers.Go(func() { q.restoreThumbnails(pending) })
+	}
+}
+
+func (q *queue) restoreThumbnails(pending []*queueEntry) {
+	for {
+		offline := pending[:0]
+		available := make(map[string]bool)
+		for _, entry := range pending {
+			if q.ctx.Err() != nil {
+				return
+			}
+			mounted, checked := available[entry.Folder]
+			if !checked {
+				_, err := checkFolder(entry.Folder)
+				mounted = err == nil
+				available[entry.Folder] = mounted
+			}
+			if !mounted {
+				offline = append(offline, entry)
+				continue
+			}
+			// Completed entries are immutable except for the cached preview.
+			// Skip a missing, replaced, or non-regular output.
+			if partSize(entry.OutputPath) == entry.Size && q.saveVideoFrame(q.ctx, entry.ID, entry.OutputPath) {
+				q.mu.Lock()
+				_ = q.updateLocked(entry, func(job *queueEntry) { job.HasThumbnail = true })
+				q.mu.Unlock()
+			}
+		}
+		pending = offline
+		if len(pending) == 0 {
+			return
+		}
+		select {
+		case <-q.ctx.Done():
+			return
+		case <-time.After(time.Minute):
+			// A previously selected network volume may now be mounted.
+		}
+	}
 }

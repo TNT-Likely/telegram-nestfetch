@@ -99,7 +99,10 @@ svg { width: 16px; height: 16px; flex: none; }
   background: #5322147a;
   clip-path: polygon(25% 55%, 96% 5%, 42% 66%, 27% 89%);
 }
-.identity strong { margin-top: 9px; font-size: 20px; line-height: 1.2; font-weight: 710; letter-spacing: -.8px; }
+.product-name { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; }
+.product-name small { color: var(--muted); font: 11px/1.3 var(--mono); letter-spacing: 0; }
+.identity .product-name { margin-top: 9px; }
+.identity strong { font-size: 20px; line-height: 1.2; font-weight: 710; letter-spacing: -.8px; }
 .identity > span:last-child { margin-top: 5px; color: var(--muted); font-size: 12px; }
 .sidebar nav { display: grid; gap: 4px; }
 .nav-item {
@@ -499,6 +502,7 @@ progress::-moz-progress-bar { background: var(--button); border-radius: 6px; }
 }
 
 @media (max-width: 475px) {
+  .compact-brand .product-name { flex-direction: column; gap: 0; }
   .preferences { gap: 4px; }
   .switch { padding: 2px; }
   .switch button { min-width: 25px; padding-inline: 4px; }

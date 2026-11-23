@@ -61,3 +61,6 @@ jobs:
         run: npm run check
       - name: Compile desktop application
         run: npm run build -- --no-bundle --target ${{ matrix.target }}
+      - name: Verify a WebM/VP9 thumbnail
+        if: runner.os == 'macOS'
+        run: xcrun swift scripts/test-video-frame.swift src-tauri/resources/tg-nestfetch-frame scripts/testdata/red-blue-vp9.webm

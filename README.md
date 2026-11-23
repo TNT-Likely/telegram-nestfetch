@@ -25,7 +25,7 @@ The macOS bundles are ad hoc signed. If Gatekeeper blocks the first launch, try 
 - 独立 Telegram 登录会话，通过二维码登录，支持两步验证。 / Separate Telegram session with QR sign-in and two-step verification.
 - 支持公开消息链接和帐号可访问的私有频道消息链接。 / Public message links and private channel links accessible to the signed-in account.
 - 下载队列支持暂停、继续、重试和显示文件位置。使用 tdl 时，继续任务会从头下载被中断的单个视频。若视频已经下完而保存目录离线，可从本机暂存文件重试保存或改存其他目录。 / Pause, continue, retry, and reveal downloads. With tdl, continuing an interrupted video restarts that file. A completed transfer stays on the device until it can be saved to the original or a new destination.
-- 优先显示 Telegram 视频缩略图。macOS 可在下载结束后从本地视频截取封面。 / Telegram thumbnails when available. macOS can capture a frame from the finished local video.
+- 优先显示 Telegram 视频封面。macOS 也能从本地视频（包括 WebM/VP9）截取画面，并为历史下载补齐缺失的预览。 / Telegram covers appear when available. On macOS, missing previews for new and previously completed downloads are generated from the local video, including WebM/VP9.
 - 简体中文、English，日间模式、暗黑模式和跟随系统。 / Simplified Chinese and English, with light, dark, and system appearance.
 
 ## 开发 / Development

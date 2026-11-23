@@ -82,10 +82,10 @@ type queue struct {
 	lastBytesAt time.Time
 	accountBusy bool
 
-	ctx    context.Context
-	cancel context.CancelFunc
-	wake   chan struct{}
-	done   chan struct{}
+	ctx     context.Context
+	cancel  context.CancelFunc
+	wake    chan struct{}
+	workers sync.WaitGroup
 }
 
 func openQueue(ctx context.Context, dataDir, downloadDir, frameHelper string, telegram Telegram) (*queue, error) {
@@ -113,13 +113,13 @@ func openQueue(ctx context.Context, dataDir, downloadDir, frameHelper string, te
 		ctx:         worker,
 		cancel:      cancel,
 		wake:        make(chan struct{}, 1),
-		done:        make(chan struct{}),
 	}
 	if err := q.load(); err != nil {
 		cancel()
 		return nil, err
 	}
-	go q.run()
+	q.startThumbnailRecovery()
+	q.workers.Go(q.run)
 	return q, nil
 }
 
@@ -169,6 +169,9 @@ func (q *queue) load() error {
 			return errors.New("invalid persisted output path")
 		}
 		entry.Speed = 0
+		if entry.HideThumbnail || (entry.HasThumbnail && !fileExists(q.thumbnailPath(entry.ID))) {
+			entry.HasThumbnail = false
+		}
 		// A forced app exit can leave a tdl work directory beside the part.
 		// Only the canonical part can be published or reused by the queue.
 		_ = discardTDLTransferDirs(filepath.Dir(q.partPath(entry.ID)))
@@ -195,7 +198,7 @@ func (q *queue) load() error {
 
 func (q *queue) close() {
 	q.cancel()
-	<-q.done
+	q.workers.Wait()
 }
 
 func (q *queue) notify() {
@@ -500,7 +503,6 @@ func fileExists(path string) bool {
 }
 
 func (q *queue) run() {
-	defer close(q.done)
 	ticker := time.NewTicker(400 * time.Millisecond)
 	defer ticker.Stop()
 	for {

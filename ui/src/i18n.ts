@@ -2,6 +2,7 @@ export type Language = 'zh' | 'en';
 
 const en = {
   subtitle: 'Save Telegram videos',
+  appVersion: 'App version',
   appearance: 'Appearance',
   light: 'Light mode',
   dark: 'Dark mode',
@@ -95,6 +96,7 @@ type CopyKey = keyof typeof en;
 
 const zh: Record<CopyKey, string> = {
   subtitle: 'Telegram 视频下载器',
+  appVersion: '应用版本',
   appearance: '外观',
   light: '日间模式',
   dark: '暗黑模式',
