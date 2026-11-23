@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { prepareTdl } from './prepare-tdl.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const triples = {
@@ -23,6 +24,7 @@ if (!goArch || !goOS || (goOS === 'darwin' && process.platform !== 'darwin')) {
 const tauri = path.join(root, 'src-tauri');
 const binaries = path.join(tauri, 'binaries');
 mkdirSync(binaries, { recursive: true });
+prepareTdl(tauri, target);
 const output = path.join(binaries, 'nestfetch-engine-' + target + (goOS === 'win32' ? '.exe' : ''));
 const engine = path.join(root, 'engine');
 const args = ['build', '-mod=readonly', '-trimpath', '-ldflags=-s -w', '-o', output];

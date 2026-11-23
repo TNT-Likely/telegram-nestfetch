@@ -6,6 +6,8 @@ ui/dist/
 src-tauri/target/
 src-tauri/gen/schemas/
 src-tauri/binaries/nestfetch-engine-*
+src-tauri/binaries/tdl-*
+src-tauri/resources/tdl/*.tar.gz
 src-tauri/resources/tg-nestfetch-frame
 artifacts/
 coverage/

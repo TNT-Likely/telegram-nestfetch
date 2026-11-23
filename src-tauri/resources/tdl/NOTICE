@@ -1,0 +1,7 @@
+tdl v0.20.4 by iyear and contributors
+https://github.com/iyear/tdl/releases/tag/v0.20.4
+
+TG NestFetch runs the upstream tdl command-line utility as a separate process.
+tdl is distributed under the GNU Affero General Public License, version 3.
+This directory contains the upstream LICENSE and the corresponding source
+archive for commit 9d7d49eef2bcb04da720c26e33598c49c68b9ddd.

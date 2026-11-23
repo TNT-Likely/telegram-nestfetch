@@ -55,6 +55,25 @@ type telegramProvider struct {
 
 var _ Telegram = (*telegramProvider)(nil)
 
+func desktopTelegram(dataDir, tdlBinary string, defaults APIConfig) (Telegram, error) {
+	info, err := os.Stat(tdlBinary)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return nil, err
+	}
+	bundled := err == nil && info.Mode().IsRegular()
+	// A later release can add a registered API app without forcing tdl users
+	// to authorize again. Explicit native credentials still take precedence.
+	if bundled && tdlHasSession(dataDir) {
+		defaults = APIConfig{}
+	}
+	native, err := newTelegram(dataDir, defaults)
+	if err != nil || !bundled || native.Status().State != "setup" {
+		return native, err
+	}
+	native.Close()
+	return newTDLProvider(dataDir, tdlBinary)
+}
+
 func newTelegram(dataDir string, defaults APIConfig) (Telegram, error) {
 	dir := filepath.Join(dataDir, "telegram")
 	if err := os.MkdirAll(dir, 0700); err != nil {

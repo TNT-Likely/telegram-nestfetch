@@ -215,7 +215,7 @@ export function App() {
     setAccountError(undefined);
     setAccountOpen(true);
     const account = snapshot?.account;
-    if (account?.preconfigured && account.state === 'disconnected' && !account.error) {
+    if (account && (account.preconfigured || account.backend === 'tdl') && account.state === 'disconnected' && !account.error) {
       void run(startLogin, setAccountError);
     }
   }
@@ -290,6 +290,7 @@ export function App() {
 
   const jobs = snapshot?.jobs ?? [];
   const account = snapshot?.account;
+  const needsSetup = account?.state === 'setup' && account.backend !== 'tdl';
   const folder = snapshot?.settings.folder;
   const leaf = folder?.replace(/[/\\]+$/, '').split(/[/\\]/).pop();
   const folderName = leaf === 'Downloads' ? t('defaultFolder') : leaf || folder || t('defaultFolder');
@@ -356,11 +357,11 @@ export function App() {
           )}
           {account && account.state !== 'connected' && (
             <div className="connect-banner">
-              <span><Send aria-hidden="true" />{t(account.state === 'setup' ? 'setupDescription' : account.state === 'disconnected' ? 'connect' : account.state)}</span>
-              <button className="secondary-button" type="button" aria-haspopup="dialog" onClick={openAccount}>{t(account.state === 'error' ? 'reconnect' : account.state === 'setup' ? 'configure' : 'scan')}</button>
+              <span><Send aria-hidden="true" />{t(needsSetup ? 'setupDescription' : account.state === 'disconnected' ? 'connect' : account.state)}</span>
+              <button className="secondary-button" type="button" aria-haspopup="dialog" onClick={openAccount}>{t(account.state === 'error' ? 'reconnect' : needsSetup ? 'configure' : 'scan')}</button>
             </div>
           )}
-          <Downloads jobs={jobs} view={view} loading={!snapshot && !engineFailure} busy={busy} language={preferences.language} t={t} connected={account?.state === 'connected'} onAction={onJobAction} />
+          <Downloads jobs={jobs} view={view} loading={!snapshot && !engineFailure} busy={busy} language={preferences.language} t={t} connected={account?.state === 'connected'} resumeRestarts={account?.backend === 'tdl'} onAction={onJobAction} />
         </div>
       </main>
       <div className="notifications" role="status" aria-live="polite">

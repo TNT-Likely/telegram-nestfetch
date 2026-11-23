@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"syscall"
 	"time"
 )
@@ -39,7 +40,15 @@ func runEngine() error {
 	}
 	defer lock.Close()
 
-	telegram, err := newTelegram(*dataDir, releaseTelegramConfig)
+	executable, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	tdlName := "tdl"
+	if runtime.GOOS == "windows" {
+		tdlName += ".exe"
+	}
+	telegram, err := desktopTelegram(*dataDir, filepath.Join(filepath.Dir(executable), tdlName), releaseTelegramConfig)
 	if err != nil {
 		return err
 	}

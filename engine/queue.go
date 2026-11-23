@@ -47,6 +47,7 @@ type Job struct {
 
 type queueEntry struct {
 	Job
+	TopicID       int         `json:"topicId,omitempty"`
 	DocumentID    int64       `json:"documentId,omitempty"`
 	TransferDone  bool        `json:"transferDone,omitempty"`
 	HideThumbnail bool        `json:"hideThumbnail,omitempty"`
@@ -168,6 +169,9 @@ func (q *queue) load() error {
 			return errors.New("invalid persisted output path")
 		}
 		entry.Speed = 0
+		// A forced app exit can leave a tdl work directory beside the part.
+		// Only the canonical part can be published or reused by the queue.
+		_ = discardTDLTransferDirs(filepath.Dir(q.partPath(entry.ID)))
 		switch entry.State {
 		case resolving, downloading, saving:
 			entry.State = queued
@@ -358,7 +362,7 @@ func (q *queue) enqueue(rawURL string) (string, error) {
 		}
 	}
 
-	entry := &queueEntry{Job: Job{ID: id, URL: link.URL, State: queued, Folder: q.state.Folder}}
+	entry := &queueEntry{Job: Job{ID: id, URL: link.URL, State: queued, Folder: q.state.Folder}, TopicID: link.TopicID}
 	q.state.Jobs = append(q.state.Jobs, entry)
 	if err := q.persistLocked(); err != nil {
 		q.state.Jobs = q.state.Jobs[:len(q.state.Jobs)-1]
@@ -591,6 +595,9 @@ func (q *queue) fetch(ctx context.Context, entry queueEntry) (queueEntry, bool) 
 	if err != nil {
 		q.setWorkerError(ctx, entry.ID, failed, err)
 		return entry, false
+	}
+	if entry.TopicID != 0 {
+		link.TopicID = entry.TopicID
 	}
 
 	inspectCtx, cancel := context.WithTimeout(ctx, 50*time.Second)

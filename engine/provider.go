@@ -23,8 +23,10 @@ type APIConfig struct {
 
 type Account struct {
 	State         string   `json:"state"` // setup, disconnected, starting, qr, password, connected, error
+	Backend       string   `json:"backend,omitempty"`
 	Label         string   `json:"label,omitempty"`
 	QRURL         string   `json:"qrUrl,omitempty"`
+	QRImage       string   `json:"qrImage,omitempty"`
 	Expires       int64    `json:"expires,omitempty"` // Unix seconds
 	Error         *Failure `json:"error,omitempty"`
 	Preconfigured bool     `json:"preconfigured,omitempty"`
@@ -35,6 +37,7 @@ type MessageLink struct {
 	Username  string
 	ChannelID int64
 	MessageID int
+	TopicID   int
 }
 
 type Media struct {

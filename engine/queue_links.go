@@ -32,6 +32,7 @@ func parseMessageLink(raw string) (MessageLink, error) {
 	if err != nil {
 		return MessageLink{}, invalid
 	}
+	link := MessageLink{}
 	for key, values := range query {
 		if len(values) != 1 {
 			return MessageLink{}, invalid
@@ -39,9 +40,11 @@ func parseMessageLink(raw string) (MessageLink, error) {
 		switch key {
 		case "single", "t":
 		case "thread":
-			if _, ok := positiveID(values[0], 32); !ok {
+			id, ok := positiveID(values[0], 32)
+			if !ok {
 				return MessageLink{}, invalid
 			}
+			link.TopicID = int(id)
 		default:
 			// A comment can point at a different message in a discussion
 			// group, so do not silently fall back to the linked channel post.
@@ -50,7 +53,6 @@ func parseMessageLink(raw string) (MessageLink, error) {
 	}
 
 	parts := strings.Split(strings.TrimSuffix(strings.TrimPrefix(address.Path, "/"), "/"), "/")
-	link := MessageLink{}
 	channel := ""
 	switch parts[0] {
 	case "c":
@@ -82,9 +84,11 @@ func parseMessageLink(raw string) (MessageLink, error) {
 		return MessageLink{}, invalid
 	}
 	if len(parts) == 2 {
-		if _, ok := positiveID(parts[0], 32); !ok {
+		id, ok := positiveID(parts[0], 32)
+		if !ok || (link.TopicID != 0 && link.TopicID != int(id)) {
 			return MessageLink{}, invalid
 		}
+		link.TopicID = int(id)
 	}
 	id, ok := positiveID(parts[len(parts)-1], 32)
 	if !ok {

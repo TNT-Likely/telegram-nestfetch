@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { ArrowUpRight, LoaderCircle, QrCode, Send, X } from 'lucide-react';
 import QRCode from 'qrcode';
@@ -22,28 +22,38 @@ interface Props {
   onResetError: () => void;
 }
 
-function SignInCode({ url, expires, t }: { url?: string; expires?: number; t: Translate }) {
+function qrPng(value: string | undefined) {
+  if (typeof value === 'string' && value.length <= 262_144 &&
+      /^data:image\/png;base64,iVBORw0KGgo[A-Za-z0-9+/]*={0,2}$/.test(value)) {
+    return value;
+  }
+}
+
+function SignInCode({ url, image, expires, t }: { url?: string; image?: string; expires?: number; t: Translate }) {
   const [code, setCode] = useState<{ url: string; image: string }>();
+  const [brokenImage, setBrokenImage] = useState<string>();
   const [now, setNow] = useState(() => Date.now());
+  const fromEngine = useMemo(() => qrPng(image), [image]);
   const remaining = expires === undefined ? 0 : Math.max(0, Math.ceil(expires - now / 1000));
   const validTime = expires === undefined || remaining > 0;
   useEffect(() => {
-    if (!url || !/^tg:\/\/login\?token=[a-z\d_=-]{1,2048}$/i.test(url)) return;
+    if (fromEngine || !url || !/^tg:\/\/login\?token=[a-z\d_=-]{1,2048}$/i.test(url)) return;
     let disposed = false;
     void QRCode.toDataURL(url, { width: 256, margin: 4, color: { dark: '#262725', light: '#ffffff' } })
       .then(image => { if (!disposed) setCode({ url, image }); })
       .catch(() => undefined);
     return () => { disposed = true; };
-  }, [url]);
+  }, [fromEngine, url]);
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 500);
     return () => window.clearInterval(timer);
   }, []);
-  const visible = validTime && code !== undefined && code.url === url;
+  const source = fromEngine || (code && code.url === url ? code.image : undefined);
+  const visible = validTime && source && source !== brokenImage;
   return (
     <>
       <div className="qr" aria-busy={!visible}>
-        {visible ? <img src={code.image} alt={t('qrLabel')} draggable={false} /> : <LoaderCircle className="spin" aria-hidden="true" />}
+        {visible ? <img src={source} alt={t('qrLabel')} draggable={false} onError={() => setBrokenImage(source)} /> : <LoaderCircle className="spin" aria-hidden="true" />}
       </div>
       <p className="qr-timer">
         {visible && expires !== undefined ? t('qrTimer').replace('{seconds}', String(remaining)) : visible ? '' : t('qrRefreshing')}
@@ -96,13 +106,19 @@ export function AccountDialog({
     onPassword(value);
   }
 
-  const setup = editing || account.state === 'setup';
+  const tdl = account.backend === 'tdl';
+  const setup = !tdl && (editing || account.state === 'setup');
   const connected = account.state === 'connected';
-  const title = setup ? t('configure') : connected ? (confirming ? t('confirmSignOut') : t('account'))
+  const signOutText = t(tdl ? 'disconnectTdl' : 'signOut');
+  const title = setup ? t('configure') : connected ? (confirming ? t(tdl ? 'confirmDisconnectTdl' : 'confirmSignOut') : t('account'))
     : account.state === 'password' ? t('passwordTitle')
       : account.state === 'starting' || account.state === 'qr' ? t('qrTitle') : t('connect');
   const shownError = credentialsError ? { code: 'config_invalid' } : failure || (!editing ? account.error : undefined);
-  const message = shownError && <p className="dialog-error" role="alert">{failureText(language, shownError.code)}</p>;
+  const message = shownError && (
+    <p className="dialog-error" role="alert">
+      {tdl && shownError.code === 'password_invalid' ? t('tdlPasswordRetry') : failureText(language, shownError.code)}
+    </p>
+  );
 
   return (
     <dialog ref={dialog} className="account-dialog" aria-labelledby="dialog-title" onCancel={event => { event.preventDefault(); if (!busy) onClose(); }}>
@@ -137,11 +153,11 @@ export function AccountDialog({
       ) : connected ? (
         confirming ? (
           <>
-            <p className="dialog-copy">{t('confirmSignOutDescription')}</p>
+            <p className="dialog-copy">{t(tdl ? 'confirmDisconnectTdlDescription' : 'confirmSignOutDescription')}</p>
             {message}
             <div className="dialog-actions">
               <button className="secondary-button" type="button" disabled={busy} onClick={() => { setConfirming(false); onResetError(); }}>{t('cancel')}</button>
-              <button className="primary-button" type="button" disabled={busy} onClick={() => { void onSignOut().then(success => { if (success) setConfirming(false); }); }}>{t('signOut')}</button>
+              <button className="primary-button" type="button" disabled={busy} onClick={() => { void onSignOut().then(success => { if (success) setConfirming(false); }); }}>{signOutText}</button>
             </div>
           </>
         ) : (
@@ -156,7 +172,7 @@ export function AccountDialog({
             <p className="dialog-copy">{t('sessionDescription')}</p>
             {message}
             <div className="dialog-actions">
-              <button className="secondary-button" type="button" disabled={busy} onClick={() => setConfirming(true)}>{t('signOut')}</button>
+              <button className="secondary-button" type="button" disabled={busy} onClick={() => setConfirming(true)}>{signOutText}</button>
               <button className="primary-button" type="button" disabled={busy} onClick={onClose}>{t('done')}</button>
             </div>
           </>
@@ -179,7 +195,7 @@ export function AccountDialog({
       ) : account.state === 'starting' || account.state === 'qr' ? (
         <>
           <p className="dialog-copy">{t('scanSteps')}</p>
-          <SignInCode url={account.qrUrl} expires={account.expires} t={t} />
+          <SignInCode url={account.qrUrl} image={account.qrImage} expires={account.expires} t={t} />
           {message}
           <div className="dialog-actions">
             <button className="secondary-button" type="button" disabled={busy} onClick={onClose}>{t('cancel')}</button>
@@ -191,7 +207,7 @@ export function AccountDialog({
           <p className="dialog-copy">{t('connectDescription')}</p>
           {message}
           <div className="dialog-actions dialog-actions-wrap">
-            <button className="secondary-button" type="button" disabled={busy} onClick={() => { setEditing(true); onResetError(); }}>{t('editCredentials')}</button>
+            {!tdl && <button className="secondary-button" type="button" disabled={busy} onClick={() => { setEditing(true); onResetError(); }}>{t('editCredentials')}</button>}
             <button className="primary-button" type="button" disabled={busy} onClick={onLogin}><QrCode aria-hidden="true" />{t('scan')}</button>
           </div>
         </>

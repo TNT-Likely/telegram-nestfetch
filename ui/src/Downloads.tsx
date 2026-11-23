@@ -89,6 +89,7 @@ interface JobProps {
   t: Translate;
   language: Language;
   connected: boolean;
+  resumeRestarts: boolean;
   busy: boolean;
   onAction: (job: Job, action: JobAction) => void;
 }
@@ -101,7 +102,7 @@ function Status({ job, t }: Pick<JobProps, 'job' | 't'>) {
   return <span className="job-state"><i className="dot" />{t(job.state)}</span>;
 }
 
-function TransferProgress({ job, t }: Pick<JobProps, 'job' | 't'>) {
+function TransferProgress({ job, t, resumeRestarts }: Pick<JobProps, 'job' | 't' | 'resumeRestarts'>) {
   const known = job.size > 0;
   const transferred = known ? Math.min(job.size, Math.max(0, job.downloaded)) : Math.max(0, job.downloaded);
   return (
@@ -118,11 +119,12 @@ function TransferProgress({ job, t }: Pick<JobProps, 'job' | 't'>) {
         max={known ? job.size : 1}
         value={known ? transferred : undefined}
       />
+      {job.state === 'paused' && resumeRestarts && <p className="row-hint">{t('resumeRestarts')}</p>}
     </div>
   );
 }
 
-function FeaturedJob({ job, t, busy, onAction }: JobProps) {
+function FeaturedJob({ job, t, resumeRestarts, busy, onAction }: JobProps) {
   const { element, cover } = useCover(job.id, job.hasThumbnail);
   const seconds = duration(job.duration);
   const title = jobTitle(job, t);
@@ -155,12 +157,12 @@ function FeaturedJob({ job, t, busy, onAction }: JobProps) {
           )}
         </div>
       </div>
-      <TransferProgress job={job} t={t} />
+      <TransferProgress job={job} t={t} resumeRestarts={resumeRestarts} />
     </article>
   );
 }
 
-function DownloadRow({ job, t, language, connected, busy, onAction }: JobProps) {
+function DownloadRow({ job, t, language, connected, resumeRestarts, busy, onAction }: JobProps) {
   const { element, cover } = useCover(job.id, job.hasThumbnail);
   const seconds = duration(job.duration);
   const title = jobTitle(job, t);
@@ -173,7 +175,8 @@ function DownloadRow({ job, t, language, connected, busy, onAction }: JobProps) 
   const detail = job.state === 'waiting_save' ? t('waitingDescription')
     : job.error ? failureText(language, job.error.code)
       : !connected && job.state === 'queued' ? t('waitingForLogin')
-        : job.size > 0 ? filesize(job.size) : job.source;
+        : job.state === 'paused' && resumeRestarts ? t('resumeRestarts')
+          : job.size > 0 ? filesize(job.size) : job.source;
   return (
     <li className="download-row" data-state={job.state}>
       <div className="thumb" ref={element} aria-hidden="true">

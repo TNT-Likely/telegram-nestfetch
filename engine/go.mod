@@ -3,8 +3,12 @@ module github.com/TNT-Likely/telegram-nestfetch/engine
 go 1.26.0
 
 require (
+	github.com/AlecAivazis/survey/v2 v2.3.7
+	github.com/creack/pty v1.1.24
 	github.com/gotd/td v0.165.1
 	golang.org/x/sys v0.47.0
+	golang.org/x/term v0.45.0
+	rsc.io/qr v0.2.0
 )
 
 require (
@@ -24,9 +28,11 @@ require (
 	github.com/gotd/ige v0.3.0 // indirect
 	github.com/gotd/log v0.1.0 // indirect
 	github.com/gotd/neo v0.1.5 // indirect
+	github.com/kballard/go-shellquote v0.0.0-20180428030007-95032a82bc51 // indirect
 	github.com/klauspost/compress v1.19.2 // indirect
 	github.com/mattn/go-colorable v0.1.15 // indirect
 	github.com/mattn/go-isatty v0.0.22 // indirect
+	github.com/mgutz/ansi v0.0.0-20170206155736-9520e82c474b // indirect
 	github.com/ogen-go/ogen v1.23.0 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/refraction-networking/utls v1.8.2 // indirect
@@ -50,5 +56,4 @@ require (
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	nhooyr.io/websocket v1.8.17 // indirect
-	rsc.io/qr v0.2.0 // indirect
 )

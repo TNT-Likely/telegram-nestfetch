@@ -19,8 +19,10 @@ export type AccountState =
 
 export interface Account {
   state: AccountState;
+  backend?: 'tdl';
   preconfigured?: boolean;
   label?: string;
+  qrImage?: string;
   qrUrl?: string;
   expires?: number;
   error?: Failure;

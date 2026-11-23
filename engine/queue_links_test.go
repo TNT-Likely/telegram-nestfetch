@@ -23,6 +23,7 @@ func TestMessageLink(t *testing.T) {
 		"https://t.me/+123456", "https://t.me/joinchat/123456", "https://t.me/who",
 		"https://t.me/sample_channel/0", "https://t.me/sample_channel/2147483648",
 		"https://t.me/sample_channel/42?comment=9", "https://t.me/sample_channel/42?thread=abc",
+		"https://t.me/sample_channel/7/42?thread=8",
 		"https://t.me/sample_channel/%34%32", "https://t.me/a/../sample_channel/42",
 		"https://t.me/c/0/63", "https://t.me/c/12", "https://t.me/sample_channel//42",
 		"http://t.me/sample_channel/42", "https://elsewhere.example@t.me/channel/42",
@@ -31,5 +32,14 @@ func TestMessageLink(t *testing.T) {
 	} {
 		_, err := parseMessageLink(raw)
 		expectCode(t, err, "invalid_link")
+	}
+}
+
+func TestTopicHint(t *testing.T) {
+	for _, raw := range []string{"https://t.me/sample_channel/7/42", "https://t.me/sample_channel/42?thread=7"} {
+		link, err := parseMessageLink(raw)
+		if err != nil || link.TopicID != 7 || link.URL != mediaURL {
+			t.Fatalf("topic link parsed as %+v, %v", link, err)
+		}
 	}
 }
