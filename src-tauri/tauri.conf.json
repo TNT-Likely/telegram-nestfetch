@@ -53,7 +53,7 @@
     "shortDescription": "Desktop video downloader for Telegram",
     "longDescription": "An independent desktop application for saving videos from Telegram message links using the Telegram API.",
     "license": "MIT",
-    "licenseFile": "../LICENSE",
+    "resources": { "../LICENSE": "LICENSE" },
     "publisher": "TNT-Likely"
   }
 }
