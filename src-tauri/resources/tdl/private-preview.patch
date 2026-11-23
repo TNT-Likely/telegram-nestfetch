@@ -1,9 +1,9 @@
 diff --git a/app/dl/nestfetch_preview.go b/app/dl/nestfetch_preview.go
 new file mode 100644
-index 0000000..6baa5be
+index 0000000..e396606
 --- /dev/null
 +++ b/app/dl/nestfetch_preview.go
-@@ -0,0 +1,144 @@
+@@ -0,0 +1,146 @@
 +package dl
 +
 +import (
@@ -86,6 +86,8 @@ index 0000000..6baa5be
 +	return preview.Serve(ctx, size, contentType, read, func(address string) error {
 +		_, err := fmt.Fprintln(status, "NESTFETCH_PREVIEW "+address)
 +		return err
++	}, func(count int64, elapsed time.Duration) {
++		_, _ = fmt.Fprintf(status, "NESTFETCH_PREVIEW_READ %d %d\n", count, elapsed.Nanoseconds())
 +	})
 +}
 +

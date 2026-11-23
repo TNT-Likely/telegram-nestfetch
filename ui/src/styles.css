@@ -162,9 +162,11 @@ svg { width: 16px; height: 16px; flex: none; }
 .compact-brand { display: none; }
 .preferences, .switch { display: flex; align-items: center; }
 .preferences { gap: 8px; }
-.project-link { display: flex; align-items: center; gap: 4px; min-height: 32px; padding: 3px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--sidebar); color: var(--muted); font-size: 11px; font-weight: 640; white-space: nowrap; }
-.project-link:hover { background: var(--field); color: var(--text); }
-.project-link svg { width: 13px; height: 13px; }
+.project-link { display: grid; place-items: center; flex: none; width: 32px; height: 32px; border: 1px solid var(--line); border-radius: 8px; background: var(--sidebar); }
+.project-link:hover { background: var(--field); }
+.project-link img { opacity: .8; }
+.project-link:hover img { opacity: 1; }
+:root[data-theme="dark"] .project-link img { filter: invert(1); }
 .switch { padding: 3px; gap: 2px; border: 1px solid var(--line); border-radius: 8px; background: var(--sidebar); }
 .switch button {
   display: grid;
@@ -540,6 +542,11 @@ progress::-moz-progress-bar { background: var(--button); border-radius: 6px; }
 .video-stage video { display: block; width: 100%; height: 100%; max-height: 56vh; object-fit: contain; }
 .video-state { display: grid; justify-items: center; gap: 8px; max-width: 370px; padding: 12px; text-align: center; font-size: 13px; }
 .video-state > svg { width: 25px; height: 25px; }
+.preview-transfer { flex: 1 1 110px; min-width: 0; }
+.preview-transfer-numbers { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 2px 9px; color: var(--muted); font-size: 12px; }
+.preview-transfer-numbers b { color: var(--text); font: 11px/1.4 var(--mono); white-space: nowrap; }
+.preview-transfer progress { margin-top: 4px; }
+.preview-transfer progress:indeterminate { appearance: auto; accent-color: var(--button); }
 
 @media (max-width: 650px) {
   :root { --inset: clamp(12px, 3.8vw, 22px); }
@@ -582,7 +589,7 @@ progress::-moz-progress-bar { background: var(--button); border-radius: 6px; }
 }
 
 @media (max-width: 475px) {
-  .project-link span { display: none; }
+  .project-link { width: 28px; height: 30px; }
   .compact-brand .product-name { flex-direction: column; gap: 0; }
   .preferences { gap: 4px; }
   .switch { padding: 2px; }

@@ -86,7 +86,7 @@ export interface BatchResult {
   duplicates: number;
 }
 
-interface TaskReference { id: string }
+export interface TaskReference { id: string }
 type TaskStatus<Result> =
   | { state: 'loading'; waiting?: boolean }
   | { state: 'failed'; error?: Failure }
@@ -114,7 +114,8 @@ interface EngineMethods {
   attachments_status: [TaskReference, TaskStatus<{ items: Attachment[]; nextBefore?: number }>];
   browse_cancel: [TaskReference, null];
   preview_start: [{ url: string }, TaskReference];
-  preview_status: [TaskReference, TaskStatus<{ url: string }>];
+  local_preview_start: [{ id: string }, TaskReference];
+  preview_status: [TaskReference, TaskStatus<{ url: string; speed?: number; bytesRead?: number }>];
   preview_stop: [TaskReference, null];
   pause: [{ id: string }, null];
   resume: [{ id: string }, null];

@@ -27,7 +27,8 @@ The macOS bundles are ad hoc signed. If Gatekeeper blocks the first launch, try 
 - 独立 Telegram 登录会话，通过二维码登录，支持两步验证。 / Separate Telegram session with QR sign-in and two-step verification.
 - 支持公开消息链接和帐号可访问的私有频道消息链接。 / Public message links and private channel links accessible to the signed-in account.
 - 支持视频、图片、音频和文档。频道附件可按日历日期分页浏览，勾选后批量加入队列。 / Browse channel attachments by date, then select videos, images, audio, and other files to queue together.
-- 试看在应用窗口内播放，按需读取视频片段。已有下载完成或暂停后可开始试看，关闭试看后队列继续。 / Play videos in the app and stream parts on demand. A preview waits for the current download to finish or pause. The queue continues when you close the player.
+- 试看在窗口内按需读取视频片段，并显示缓冲进度和取流速度。当前下载完成或暂停后可开始试看，关闭试看后队列继续。 / Stream videos in the app with buffering progress and transfer speed. A preview waits for the current download to finish or pause. The queue continues when you close the player.
+- 已完成的视频可以从下载列表直接播放。播放时读取保存好的文件，支持离线播放。 / Play finished videos from the download list, including offline playback of local files.
 - 下载队列支持暂停、继续、重试和显示文件位置。使用 tdl 时，继续任务会从头下载被中断的文件。目录离线时可从本机暂存文件重试保存或改存其他目录。 / Pause, continue, retry, and reveal downloads. With tdl, continuing an interrupted transfer restarts that file. A finished transfer stays on the device until it can be saved to the original or a new destination.
 - 优先显示 Telegram 封面。macOS 也能从本地图片和视频（包括 WebM/VP9）生成预览。 / Telegram covers appear when available. On macOS, missing previews can be generated from local photos and videos, including WebM/VP9.
 - 简体中文、English，日间模式、暗黑模式和跟随系统。 / Simplified Chinese and English, with light, dark, and system appearance.

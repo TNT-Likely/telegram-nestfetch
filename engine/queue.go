@@ -72,17 +72,18 @@ type settings struct {
 }
 
 type queue struct {
-	mu           sync.Mutex
-	state        queueState
-	statePath    string
-	dataDir      string
-	frameHelper  string
-	telegram     Telegram
-	activeID     string
-	cancelJob    context.CancelFunc
-	lastBytesAt  time.Time
-	accountBusy  bool
-	telegramTask *telegramTask
+	mu            sync.Mutex
+	state         queueState
+	statePath     string
+	dataDir       string
+	frameHelper   string
+	telegram      Telegram
+	activeID      string
+	cancelJob     context.CancelFunc
+	lastBytesAt   time.Time
+	accountBusy   bool
+	telegramTask  *mediaTask
+	localPlayback *mediaTask
 
 	ctx     context.Context
 	cancel  context.CancelFunc
@@ -203,7 +204,9 @@ func (q *queue) load() error {
 }
 
 func (q *queue) close() {
+	q.mu.Lock()
 	q.cancel()
+	q.mu.Unlock()
 	q.workers.Wait()
 }
 
@@ -589,7 +592,10 @@ func (q *queue) workNext() bool {
 		task.begun = true
 		q.accountBusy = true
 		q.mu.Unlock()
-		q.runTelegramTask(task)
+		q.runMediaTask(task, &q.telegramTask)
+		q.mu.Lock()
+		q.accountBusy = false
+		q.mu.Unlock()
 		return true
 	}
 	connected := q.telegram.Status().State == "connected"

@@ -100,7 +100,7 @@ func dispatch(ctx context.Context, q *queue, message request) (any, error) {
 		return q.enqueue(args.URL)
 	case "enqueue_batch":
 		return q.enqueueBatch(args.URLs)
-	case "channels_start", "attachments_start", "preview_start":
+	case "channels_start", "attachments_start", "preview_start", "local_preview_start":
 		var id string
 		var err error
 		switch message.Method {
@@ -110,14 +110,16 @@ func dispatch(ctx context.Context, q *queue, message request) (any, error) {
 			id, err = q.startAttachmentList(args.channelQuery)
 		case "preview_start":
 			id, err = q.startPreview(args.URL)
+		case "local_preview_start":
+			id, err = q.startLocalPlayback(args.ID)
 		}
 		return map[string]string{"id": id}, err
 	case "channels_status":
-		return q.telegramTaskStatus("channels", args.ID)
+		return q.mediaTaskStatus("channels", args.ID)
 	case "attachments_status":
-		return q.telegramTaskStatus("attachments", args.ID)
+		return q.mediaTaskStatus("attachments", args.ID)
 	case "preview_status":
-		return q.telegramTaskStatus("preview", args.ID)
+		return q.mediaTaskStatus("preview", args.ID)
 	case "browse_cancel", "preview_stop":
 		q.cancelTelegramTask(args.ID, message.Method == "preview_stop")
 		return nil, nil

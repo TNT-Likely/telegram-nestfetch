@@ -3,13 +3,16 @@ package main
 
 import (
 	"context"
+	"time"
 
 	"github.com/TNT-Likely/telegram-nestfetch/engine/preview"
 	"github.com/gotd/td/telegram/downloader"
 	"github.com/gotd/td/tg"
 )
 
-func (p *telegramProvider) Preview(parent context.Context, link MessageLink, ready func(string)) error {
+func (p *telegramProvider) Preview(parent context.Context, link MessageLink,
+	ready func(string), report func(int64, time.Duration),
+) error {
 	client, ctx, release, err := p.sessionFor(parent)
 	if err != nil {
 		return err
@@ -60,7 +63,7 @@ func (p *telegramProvider) Preview(parent context.Context, link MessageLink, rea
 	err = preview.Serve(ctx, attachment.media.Bytes, contentType, read, func(address string) error {
 		ready(address)
 		return nil
-	})
+	}, report)
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}

@@ -1,16 +1,17 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
-import { ArrowDownToLine, ArrowUpRight, ChevronDown, ChevronRight, CircleCheck, Folder, Layers, Library, Link2, Monitor, Moon, Play, Send, Sun, X } from 'lucide-react';
+import { ArrowDownToLine, ChevronDown, ChevronRight, CircleCheck, Folder, Layers, Library, Link2, Monitor, Moon, Play, Send, Sun, X } from 'lucide-react';
 import { AccountDialog } from './AccountDialog';
 import { ChannelAttachments } from './ChannelAttachments';
 import { countByView, Downloads } from './Downloads';
 import type { JobAction, View } from './Downloads';
 import { VideoPreview } from './VideoPreview';
-import type { PreviewTarget } from './VideoPreview';
+import type { PreviewTarget, TelegramPreviewTarget } from './VideoPreview';
 import { chooseFolder, failureOf, openProjectRepository, openTelegramSettings, request, revealJob, setWindowTheme } from './api';
 import type { Account, BatchResult, Failure, Job, Snapshot, Theme } from './api';
 import { failureText, translator } from './i18n';
 import type { Language, Translate } from './i18n';
+import githubMark from './github-mark.svg?no-inline';
 
 const preferenceKey = 'tg-nestfetch.interface';
 const appearanceChoices = [
@@ -210,7 +211,8 @@ export function App() {
   }, [notice]);
 
   useEffect(() => {
-    if (snapshot?.account.state !== 'connected' || accountOpen) setPreview(undefined);
+    if (accountOpen) setPreview(undefined);
+    else if (snapshot?.account.state !== 'connected') setPreview(current => current?.jobId ? current : undefined);
   }, [snapshot?.account.state, accountOpen]);
 
   async function run(task: () => Promise<void>, setError: (failure: Failure | undefined) => void = setAppError, fallback = 'unexpected') {
@@ -287,9 +289,13 @@ export function App() {
     else input.current?.focus();
   }
 
-  function openPreview(target: PreviewTarget) {
+  function openPreview(target: TelegramPreviewTarget) {
     if (snapshot?.account.state === 'connected') setPreview(target);
     else openAccount();
+  }
+
+  function playDownload(job: Job, thumbnail: string | undefined) {
+    setPreview({ jobId: job.id, name: job.title || job.name, thumbnail });
   }
 
   async function addFromPreview(url: string) {
@@ -367,7 +373,7 @@ export function App() {
             </div>
             <button className="project-link" type="button" title={t('projectRepository')} aria-label={t('projectRepository')}
               onClick={() => { void openProjectRepository().catch(error => setAppError(failureOf(error, 'open_failed'))); }}>
-              <span>GitHub</span><ArrowUpRight aria-hidden="true" />
+              <img src={githubMark} alt="" width="16" height="16" />
             </button>
           </div>
         </header>
@@ -419,14 +425,14 @@ export function App() {
           {view === 'channels'
             ? account?.state === 'connected' && <ChannelAttachments
               t={t} language={preferences.language} busy={busy} destination={destination} notification={notification} onPreview={openPreview} onQueue={addBatch} />
-            : <Downloads jobs={jobs} view={view} loading={!snapshot && !engineFailure} busy={busy} language={preferences.language} t={t} connected={account?.state === 'connected'} resumeRestarts={account?.backend === 'tdl'} onAction={onJobAction} />}
+            : <Downloads jobs={jobs} view={view} loading={!snapshot && !engineFailure} busy={busy} language={preferences.language} t={t} connected={account?.state === 'connected'} resumeRestarts={account?.backend === 'tdl'} onAction={onJobAction} onPlay={playDownload} />}
         </div>
       </main>
       {view !== 'channels' && <div className="notifications" role="status" aria-live="polite">
         {notification && <span>{notification}</span>}
       </div>}
-      {preview && account?.state === 'connected' && !accountOpen && (
-        <VideoPreview key={preview.url} target={preview} t={t} language={preferences.language} onClose={() => setPreview(undefined)} onDownload={addFromPreview} />
+      {preview && (preview.jobId || account?.state === 'connected') && !accountOpen && (
+        <VideoPreview key={preview.jobId ?? preview.url} target={preview} t={t} language={preferences.language} onClose={() => setPreview(undefined)} onDownload={addFromPreview} />
       )}
       {accountOpen && account && (
         <AccountDialog

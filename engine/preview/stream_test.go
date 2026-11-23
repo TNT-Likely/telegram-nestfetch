@@ -14,16 +14,19 @@ import (
 )
 
 func TestPreviewRangesAndAccess(t *testing.T) {
-	content := make([]byte, blockSize+29)
+	content := make([]byte, BlockSize+29)
 	for i := range content {
 		content[i] = byte(i % 251)
 	}
-	var reads atomic.Int32
+	const transferDelay = 2 * time.Millisecond
+	var reads, reports atomic.Int32
+	var totalBytes atomic.Int64
 	read := func(_ context.Context, offset int64, block []byte) (int, error) {
-		if offset%blockSize != 0 || len(block) != blockSize {
+		if offset%BlockSize != 0 || len(block) != BlockSize {
 			t.Errorf("incorrect Telegram chunk: offset %d, size %d", offset, len(block))
 		}
 		reads.Add(1)
+		time.Sleep(transferDelay)
 		return copy(block, content[offset:]), nil
 	}
 
@@ -35,6 +38,12 @@ func TestPreviewRangesAndAccess(t *testing.T) {
 		done <- Serve(ctx, int64(len(content)), "video/mp4", read, func(addr string) error {
 			open <- addr
 			return nil
+		}, func(count int64, elapsed time.Duration) {
+			if elapsed < transferDelay {
+				t.Errorf("reported duration %s excludes the upstream read", elapsed)
+			}
+			reports.Add(1)
+			totalBytes.Add(count)
 		})
 	}()
 	var addr string
@@ -79,23 +88,24 @@ func TestPreviewRangesAndAccess(t *testing.T) {
 	get(http.MethodPost, addr, "", "", http.StatusMethodNotAllowed)
 	body, hdr := get(http.MethodHead, addr, "", "", http.StatusOK)
 	if len(body) != 0 || hdr.Get("Content-Length") != fmt.Sprint(len(content)) ||
-		hdr.Get("Cache-Control") != "no-store" || hdr.Get("Accept-Ranges") != "bytes" || reads.Load() != 0 {
+		hdr.Get("Cache-Control") != "no-store" || hdr.Get("Accept-Ranges") != "bytes" || reads.Load() != 0 || reports.Load() != 0 {
 		t.Fatal("HEAD or an unauthorized request fetched media, or stream metadata was incorrect")
 	}
 
 	body, hdr = get(http.MethodGet, addr, "", "bytes=0-1", http.StatusPartialContent)
 	if !bytes.Equal(body, content[:2]) || hdr.Get("Content-Range") != fmt.Sprintf("bytes 0-1/%d", len(content)) ||
-		hdr.Get("Content-Type") != "video/mp4" || reads.Load() != 1 {
-		t.Fatal("the player's two-byte probe read more than its exact range or refetched a chunk")
+		hdr.Get("Content-Type") != "video/mp4" || reads.Load() != 1 || reports.Load() != 1 || totalBytes.Load() != BlockSize {
+		t.Fatal("the two-byte probe did not serve its exact range or report exactly one upstream block")
 	}
-	boundary := fmt.Sprintf("bytes=%d-%d", blockSize-2, blockSize+1)
+	boundary := fmt.Sprintf("bytes=%d-%d", BlockSize-2, BlockSize+1)
 	body, _ = get(http.MethodGet, addr, "", boundary, http.StatusPartialContent)
-	if !bytes.Equal(body, content[blockSize-2:blockSize+2]) || reads.Load() != 2 {
+	if !bytes.Equal(body, content[BlockSize-2:BlockSize+2]) || reads.Load() != 2 {
 		t.Fatal("range spanning chunks did not match the file or reuse the cached first chunk")
 	}
 	body, _ = get(http.MethodGet, addr, "", "bytes=-3", http.StatusPartialContent)
-	if !bytes.Equal(body, content[len(content)-3:]) || reads.Load() != 2 {
-		t.Fatal("incorrect suffix range")
+	if !bytes.Equal(body, content[len(content)-3:]) || reads.Load() != 2 ||
+		reports.Load() != 2 || totalBytes.Load() != int64(len(content)) {
+		t.Fatal("suffix range had incorrect bytes or reported cached data again")
 	}
 	_, hdr = get(http.MethodGet, addr, "", fmt.Sprintf("bytes=%d-", len(content)), http.StatusRequestedRangeNotSatisfiable)
 	if hdr.Get("Content-Range") != fmt.Sprintf("bytes */%d", len(content)) || reads.Load() != 2 {

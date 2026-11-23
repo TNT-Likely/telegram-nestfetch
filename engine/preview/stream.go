@@ -21,14 +21,17 @@ import (
 )
 
 const (
-	blockSize   = 512 * 1024
+	// BlockSize is the aligned byte count requested from Telegram.
+	BlockSize   = 512 * 1024
 	routePrefix = "/preview/"
 )
 
 // Serve advertises a local, private URL until ctx is cancelled. Each call to
 // read retrieves one aligned Telegram block and may return the shorter tail.
+// report receives the bytes and duration of each successful uncached read.
 func Serve(ctx context.Context, size int64, contentType string,
 	read func(context.Context, int64, []byte) (int, error), ready func(string) error,
+	report func(int64, time.Duration),
 ) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -36,7 +39,7 @@ func Serve(ctx context.Context, size int64, contentType string,
 	if size <= 0 || read == nil || !strings.HasPrefix(contentType, "video/") {
 		return errors.New("invalid preview source")
 	}
-	file := &previewFile{size: size, read: read, offset: -1}
+	file := &previewFile{size: size, read: read, report: report, offset: -1}
 	listener, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
 		return err
@@ -123,8 +126,9 @@ func (r previewReadAt) ReadAt(p []byte, offset int64) (int, error) {
 
 // A single bounded block is shared by the player's overlapping range requests.
 type previewFile struct {
-	size int64
-	read func(context.Context, int64, []byte) (int, error)
+	size   int64
+	read   func(context.Context, int64, []byte) (int, error)
+	report func(int64, time.Duration)
 
 	mu     sync.Mutex
 	offset int64
@@ -141,24 +145,29 @@ func (f *previewFile) readBlock(ctx context.Context, p []byte, offset int64) (in
 		return 0, err
 	}
 
-	aligned := offset - offset%blockSize
+	aligned := offset - offset%BlockSize
 	if aligned != f.offset {
 		ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 		defer cancel()
 		f.offset = -1
 		if f.block == nil {
-			f.block = make([]byte, blockSize)
+			f.block = make([]byte, BlockSize)
 		}
+		started := time.Now()
 		n, err := f.read(ctx, aligned, f.block)
+		elapsed := time.Since(started)
 		if err != nil && err != io.EOF {
 			return 0, err
 		}
-		if int64(n) != min(int64(blockSize), f.size-aligned) {
+		if int64(n) != min(int64(BlockSize), f.size-aligned) {
 			return 0, io.ErrUnexpectedEOF
 		}
 		f.offset = aligned
+		if f.report != nil && elapsed > 0 && ctx.Err() == nil {
+			f.report(int64(n), elapsed)
+		}
 	}
-	valid := min(int64(blockSize), f.size-aligned)
+	valid := min(int64(BlockSize), f.size-aligned)
 	return copy(p, f.block[offset-aligned:valid]), nil
 }
 

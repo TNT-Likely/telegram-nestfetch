@@ -215,8 +215,14 @@ func TestTelegramWireLoginCoverAndResumedTransfer(t *testing.T) {
 	defer endPreview()
 	ready := make(chan string, 1)
 	previewDone := make(chan error, 1)
+	var previewNetworkBytes atomic.Int64
 	go func() {
-		previewDone <- p.Preview(previewCtx, link, func(address string) { ready <- address })
+		previewDone <- p.Preview(previewCtx, link, func(address string) { ready <- address }, func(count int64, elapsed time.Duration) {
+			if elapsed <= 0 {
+				t.Error("preview measurement has no elapsed time")
+			}
+			previewNetworkBytes.Add(count)
+		})
 	}()
 	var address string
 	select {
@@ -240,6 +246,9 @@ func TestTelegramWireLoginCoverAndResumedTransfer(t *testing.T) {
 	response.Body.Close()
 	if err != nil || response.StatusCode != http.StatusPartialContent || !bytes.Equal(previewBytes, fileBytes[startByte:endByte]) {
 		t.Fatalf("incorrect Telegram preview range: HTTP %d, bytes %d, error %v", response.StatusCode, len(previewBytes), err)
+	}
+	if got := previewNetworkBytes.Load(); got != 2*telegramPartSize {
+		t.Fatalf("preview reported %d upstream bytes, want %d", got, 2*telegramPartSize)
 	}
 	endPreview()
 	select {

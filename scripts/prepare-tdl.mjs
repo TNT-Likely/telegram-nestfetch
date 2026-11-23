@@ -54,7 +54,7 @@ export function prepareTdl(tauri, target, goOS, goArch) {
     copyFileSync(stream, path.join(streamPackage, 'stream.go'));
     copyFileSync(stream, path.join(resources, 'nestfetch-preview-stream.go'));
     const flags = '-s -w -X github.com/iyear/tdl/pkg/consts.Version=' + version +
-      '-nestfetch.2 -X github.com/iyear/tdl/pkg/consts.Commit=' + commit.slice(0, 7);
+      '-nestfetch.3 -X github.com/iyear/tdl/pkg/consts.Commit=' + commit.slice(0, 7);
     const output = path.join(tauri, 'binaries', 'tdl-' + target + (goOS === 'windows' ? '.exe' : ''));
     execFileSync('go', ['build', '-mod=readonly', '-trimpath', '-buildvcs=false', '-ldflags', flags, '-o', output, '.'], {
       cwd: source, stdio: 'inherit',

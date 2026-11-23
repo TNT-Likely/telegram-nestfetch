@@ -70,6 +70,7 @@ interface JobProps {
   resumeRestarts: boolean;
   busy: boolean;
   onAction: (job: Job, action: JobAction) => void;
+  onPlay: (job: Job, cover: string | undefined) => void;
 }
 
 function jobTitle(job: Job, t: Translate) {
@@ -140,7 +141,7 @@ function FeaturedJob({ job, t, resumeRestarts, busy, onAction }: JobProps) {
   );
 }
 
-function DownloadRow({ job, t, language, connected, resumeRestarts, busy, onAction }: JobProps) {
+function DownloadRow({ job, t, language, connected, resumeRestarts, busy, onAction, onPlay }: JobProps) {
   const { element, cover } = useCover(job.id, job.hasThumbnail);
   const seconds = duration(job.duration);
   const title = jobTitle(job, t);
@@ -175,6 +176,12 @@ function DownloadRow({ job, t, language, connected, resumeRestarts, busy, onActi
         )}
       </div>
       <div className="row-actions">
+        {job.state === 'completed' && job.kind === 'video' && (
+          <button className="row-action" type="button" title={t('play')} aria-label={`${t('play')} · ${title}`} aria-haspopup="dialog" disabled={busy} onClick={() => onPlay(job, cover)}>
+            <Play aria-hidden="true" />
+            <span>{t('play')}</span>
+          </button>
+        )}
         {job.state === 'waiting_save' && (
           <button className="row-action" type="button" title={t('saveElsewhere')} aria-label={t('saveElsewhere') + ' · ' + title} disabled={busy} onClick={() => onAction(job, 'save_elsewhere')}>
             <FolderOpen aria-hidden="true" />

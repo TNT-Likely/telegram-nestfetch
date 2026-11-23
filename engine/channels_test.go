@@ -113,8 +113,9 @@ type testTelegramPreview struct {
 	stopped chan struct{}
 }
 
-func (p *testTelegramPreview) Preview(ctx context.Context, _ MessageLink, ready func(string)) error {
+func (p *testTelegramPreview) Preview(ctx context.Context, _ MessageLink, ready func(string), report func(int64, time.Duration)) error {
 	ready("http://127.0.0.1:32000/preview/0148d1c53d37fb4b414d199a371fd586434ad8698aa0c5995e38c380c8d671e2")
+	report(256*1024, 250*time.Millisecond)
 	<-ctx.Done()
 	close(p.stopped)
 	return ctx.Err()
@@ -134,11 +135,14 @@ func TestPreviewCancellationReleasesQueuedDownloads(t *testing.T) {
 	}
 	deadline := time.Now().Add(4 * time.Second)
 	for {
-		status, err := q.telegramTaskStatus("preview", previewID)
+		status, err := q.mediaTaskStatus("preview", previewID)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if status.State == "ready" && status.URL != "" {
+		if status.State == "ready" && status.URL != "" && status.BytesRead > 0 {
+			if status.BytesRead != 256*1024 || status.Speed != 1024*1024 {
+				t.Fatalf("unexpected preview throughput: %+v", status)
+			}
 			break
 		}
 		if status.State == "failed" || time.Now().After(deadline) {
@@ -158,7 +162,7 @@ func TestPreviewCancellationReleasesQueuedDownloads(t *testing.T) {
 	case <-time.After(4 * time.Second):
 		t.Fatal("preview did not stop")
 	}
-	_, err = q.telegramTaskStatus("preview", previewID)
+	_, err = q.mediaTaskStatus("preview", previewID)
 	expectCode(t, err, "not_found")
 	complete := expectState(t, q, job, completed)
 	if filepath.Base(complete.OutputPath) != "clip.mp4" {

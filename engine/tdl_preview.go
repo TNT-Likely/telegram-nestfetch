@@ -11,11 +11,17 @@ import (
 	"github.com/TNT-Likely/telegram-nestfetch/engine/preview"
 )
 
-const tdlPreviewPrefix = "NESTFETCH_PREVIEW "
+const (
+	tdlPreviewPrefix     = "NESTFETCH_PREVIEW "
+	tdlPreviewReadPrefix = "NESTFETCH_PREVIEW_READ "
+	maxTDLPreviewRead    = 30 * time.Second
+)
 
 // Preview returns after the playback session is closed and its tdl process
 // has released the desktop account's storage.
-func (p *tdlProvider) Preview(parent context.Context, link MessageLink, ready func(string)) error {
+func (p *tdlProvider) Preview(parent context.Context, link MessageLink,
+	ready func(string), report func(int64, time.Duration),
+) error {
 	if err := p.requireTDLSession(); err != nil {
 		return err
 	}
@@ -46,7 +52,14 @@ func (p *tdlProvider) Preview(parent context.Context, link MessageLink, ready fu
 		return telegramFailure("preview_unavailable")
 	}
 	defer input.Close()
-	output := tdlPreviewOutput{opened: make(chan string, 1)}
+	output := tdlPreviewOutput{
+		opened: make(chan string, 1),
+		report: func(count int64, elapsed time.Duration) {
+			if report != nil && ctx.Err() == nil {
+				report(count, elapsed)
+			}
+		},
+	}
 	var errorsOutput tdlMediaOutput
 	cmd.Stdout, cmd.Stderr = &output, &errorsOutput
 	if err := cmd.Start(); err != nil {
@@ -90,13 +103,14 @@ func (p *tdlProvider) previewProcessFailure(ctx context.Context, runErr error, l
 	return telegramFailure("preview_unavailable")
 }
 
-// The readiness line is read from the process pipe, separate from later
-// error mapping. Only the expected loopback URL is sent to the UI.
+// Readiness and transfer measurements are consumed separately from diagnostics.
 type tdlPreviewOutput struct {
-	opened  chan string
-	log     tdlMediaOutput
-	pending []byte
-	discard bool
+	opened    chan string
+	report    func(int64, time.Duration)
+	announced bool
+	log       tdlMediaOutput
+	pending   []byte
+	discard   bool
 }
 
 func (o *tdlPreviewOutput) Write(data []byte) (int, error) {
@@ -114,19 +128,40 @@ func (o *tdlPreviewOutput) Write(data []byte) (int, error) {
 			break
 		}
 		if !o.discard {
-			if address, ok := strings.CutPrefix(string(bytes.TrimRight(o.pending, "\r")), tdlPreviewPrefix); ok {
-				if preview.ValidURL(address) {
-					select {
-					case o.opened <- address:
-					default:
-					}
-				}
-			} else {
-				_, _ = o.log.Write(o.pending)
-				_, _ = o.log.Write([]byte{'\n'})
-			}
+			o.consumeLine(string(bytes.TrimRight(o.pending, "\r")))
 		}
 		o.pending, o.discard = o.pending[:0], false
 	}
 	return written, nil
+}
+
+func (o *tdlPreviewOutput) consumeLine(line string) {
+	if address, ok := strings.CutPrefix(line, tdlPreviewPrefix); ok {
+		if !o.announced && preview.ValidURL(address) {
+			select {
+			case o.opened <- address:
+				o.announced = true
+			default:
+			}
+		}
+		return
+	}
+	if measurement, ok := strings.CutPrefix(line, tdlPreviewReadPrefix); ok {
+		if !o.announced || o.report == nil {
+			return
+		}
+		countText, elapsedText, ok := strings.Cut(measurement, " ")
+		if !ok {
+			return
+		}
+		count, countErr := strconv.ParseUint(countText, 10, 32)
+		nanos, elapsedErr := strconv.ParseUint(elapsedText, 10, 64)
+		if countErr == nil && elapsedErr == nil && count > 0 && count <= preview.BlockSize &&
+			nanos > 0 && nanos <= uint64(maxTDLPreviewRead) {
+			o.report(int64(count), time.Duration(nanos))
+		}
+		return
+	}
+	_, _ = o.log.Write([]byte(line))
+	_, _ = o.log.Write([]byte{'\n'})
 }

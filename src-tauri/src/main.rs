@@ -23,7 +23,7 @@ async fn engine_request(
         | "sign_out" | "set_folder" | "enqueue" | "pause" | "resume" | "retry"
         | "save_elsewhere" | "thumbnail" | "enqueue_batch" | "channels_start" | "channels_status"
         | "attachments_start" | "attachments_status" | "browse_cancel" | "preview_start"
-        | "preview_status" | "preview_stop" => engine.request(&method, params).await,
+        | "local_preview_start" | "preview_status" | "preview_stop" => engine.request(&method, params).await,
         _ => Err(Failure::new("invalid_request")),
     }
 }

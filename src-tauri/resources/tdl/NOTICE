@@ -2,9 +2,9 @@ tdl v0.20.4 by iyear and contributors
 https://github.com/iyear/tdl/releases/tag/v0.20.4
 
 TG NestFetch runs a separately compiled tdl command-line utility. This build
-is identified as 0.20.4-nestfetch.2, modified by TG NestFetch on 2026-11-23.
+is identified as 0.20.4-nestfetch.3, modified by TG NestFetch on 2026-11-23.
 Changes include gotd v0.165.1 for cross-DC QR sign-in, channel attachment
-pagination, validation for empty photo sizes, and local video playback.
+pagination, validation for empty photo sizes, and local video playback with transfer metrics.
 
 tdl is distributed under the GNU Affero General Public License, version 3.
 This directory includes its LICENSE, the upstream source archive for commit
