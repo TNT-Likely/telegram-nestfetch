@@ -1,41 +1,49 @@
 # TG NestFetch
 
-浏览 Telegram 频道附件，试看视频，再把选中的文件保存到你选的目录。也可以直接粘贴 Telegram 消息链接下载。
+Browse Telegram channels, preview videos, and batch-download attachments to a folder you choose.
 
-Browse Telegram channel attachments, preview videos, and save selected files to a folder you choose. You can also download directly from a Telegram message link.
+[Download for macOS](https://github.com/TNT-Likely/telegram-nestfetch/releases/latest) · [简体中文](README.zh-CN.md)
 
-## 安装与使用
+![TG NestFetch showing a channel's attachments with date and type filters and selected files ready to download](docs/media/channel-attachments.png)
 
-1. 从 [GitHub Releases](https://github.com/TNT-Likely/telegram-nestfetch/releases) 下载 macOS 13 或更新版本对应的 DMG。Apple 芯片使用 `aarch64`，Intel 芯片使用 `x64`。打开 DMG，将应用拖入「应用程序」。
-2. 从 v0.1.2 起，安装包自带 tdl。点「打开登录二维码」，用手机 Telegram 的「设置 → 设备 → 连接桌面设备」扫码即可。开启两步验证时，在应用内输入 Telegram 密码。应用使用独立会话，首次使用无需申请 API ID 和 API Hash。
-3. 粘贴你有权限访问的消息链接，或打开「频道附件」，选择频道和日期范围。可以粘贴公开频道链接，也可以从列表选择已加入的频道。
-4. 筛选文件类型、勾选附件，再下载到本地目录或已挂载的网络目录。视频支持直接试看。
+## What you can do
 
-当前 macOS 安装包采用临时签名。若 Gatekeeper 在首次启动时阻止打开，可在尝试启动后通过「系统设置 → 隐私与安全性 → 仍要打开」允许这一个应用。 [Apple 支持文档](https://support.apple.com/guide/mac-help/open-a-mac-app-from-an-unidentified-developer-mh40616/mac)
+- Paste a Telegram message link to download a video, image, audio file, or document.
+- Open **Channel files**, pick a subscribed channel or paste a public channel link, and browse a date range. Filter by file type and queue several attachments at once.
+- Preview a video before saving. The player shows buffering progress and Telegram transfer speed, and lets you jump to another part of the video.
+- Play finished videos from the **Completed** list, including offline playback from local storage.
+- Save to a local folder or a mounted network volume. Pause, retry, or choose a new destination from the download queue.
 
-## Install and use
+The interface supports English and Simplified Chinese in light, dark, and system appearance.
 
-1. Download the macOS 13+ DMG from [Releases](https://github.com/TNT-Likely/telegram-nestfetch/releases). Choose `aarch64` for Apple silicon or `x64` for an Intel Mac. Open the DMG and drag the app to Applications.
-2. Version 0.1.2 bundles tdl and uses a separate Telegram session. Select **Sign in with QR code** and scan it on your phone from Telegram → Settings → Devices → Link Desktop Device. Enter your Telegram password in the app if two-step verification is enabled. The bundled client handles the application credentials.
-3. Paste a message link you can access or open **Channel attachments** and select a channel and date range. Pick a subscribed channel or paste a public channel link.
-4. Filter by file type, select attachments, and save them to a local folder or a mounted network folder. You can preview videos before downloading.
+## Demo
 
-The macOS bundles are ad hoc signed. If Gatekeeper blocks the first launch, try opening the app once, then use System Settings → Privacy & Security → Open Anyway for this app. [Apple support](https://support.apple.com/guide/mac-help/open-a-mac-app-from-an-unidentified-developer-mh40616/mac)
+![Browsing channel attachments, previewing a video, and adding selected files to the download queue](docs/media/demo.gif)
 
-## 功能 / Features
+The demo uses an example channel and a sample video from MDN. [Sample video](https://github.com/mdn/interactive-examples/blob/main/live-examples/media/cc0-videos/flower.mp4)
 
-- 独立 Telegram 登录会话，通过二维码登录，支持两步验证。 / Separate Telegram session with QR sign-in and two-step verification.
-- 支持公开消息链接和帐号可访问的私有频道消息链接。 / Public message links and private channel links accessible to the signed-in account.
-- 支持视频、图片、音频和文档。频道附件可按日历日期分页浏览，勾选后批量加入队列。 / Browse channel attachments by date, then select videos, images, audio, and other files to queue together.
-- 试看在窗口内按需读取视频片段，并显示缓冲进度和取流速度。当前下载完成或暂停后可开始试看，关闭试看后队列继续。 / Stream videos in the app with buffering progress and transfer speed. A preview waits for the current download to finish or pause. The queue continues when you close the player.
-- 已完成的视频可以从下载列表直接播放。播放时读取保存好的文件，支持离线播放。 / Play finished videos from the download list, including offline playback of local files.
-- 下载队列支持暂停、继续、重试和显示文件位置。使用 tdl 时，继续任务会从头下载被中断的文件。目录离线时可从本机暂存文件重试保存或改存其他目录。 / Pause, continue, retry, and reveal downloads. With tdl, continuing an interrupted transfer restarts that file. A finished transfer stays on the device until it can be saved to the original or a new destination.
-- 优先显示 Telegram 封面。macOS 也能从本地图片和视频（包括 WebM/VP9）生成预览。 / Telegram covers appear when available. On macOS, missing previews can be generated from local photos and videos, including WebM/VP9.
-- 简体中文、English，日间模式、暗黑模式和跟随系统。 / Simplified Chinese and English, with light, dark, and system appearance.
+<a name="install-and-use"></a>
+<a name="安装与使用"></a>
 
-## 开发 / Development
+## Install on macOS
 
-Prerequisites are Node.js 20.19+ or 22.12+, Go 1.27+, and a stable Rust toolchain. Install the [Tauri system prerequisites](https://v2.tauri.app/start/prerequisites/) for your platform.
+1. Download the DMG for macOS 13 or later. Choose `aarch64.dmg` for Apple silicon or `x64.dmg` for Intel. [Latest release](https://github.com/TNT-Likely/telegram-nestfetch/releases/latest)
+2. Open the DMG and drag **TG NestFetch** to **Applications**. The app uses an ad hoc signature. If macOS blocks the first launch, try opening the app once, then choose **Open Anyway** in **System Settings → Privacy & Security**. [Apple support](https://support.apple.com/guide/mac-help/open-a-mac-app-from-an-unidentified-developer-mh40616/mac)
+3. In TG NestFetch, choose **Sign in with QR code**. On your phone, open **Telegram → Settings → Devices → Link Desktop Device** and scan the code. Enter your two-step verification password if prompted.
+
+The app bundles [tdl](https://github.com/iyear/tdl) and uses a separate Telegram session. A preview waits for the current transfer to finish or pause, and closing the player lets the queue continue. Resuming an interrupted tdl download restarts that file. A finished transfer stays in local staging when its destination is unavailable, so you can retry saving it or choose another folder.
+
+## Platform support
+
+| Platform | Current support |
+| --- | --- |
+| macOS | DMG for Apple silicon and Intel, macOS 13 or later |
+| Windows | NSIS build target |
+| Linux | DEB and AppImage build targets |
+
+## Build from source
+
+The build workflow uses Node.js 24, Go 1.27, and stable Rust. Install the system dependencies for your platform. [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/)
 
 ```sh
 npm ci
@@ -45,20 +53,12 @@ npm run dev
 
 ```sh
 npm run check
-cd engine
-go test -mod=readonly ./...
+go -C engine test -mod=readonly ./...
+npm run build
 ```
 
-Run `npm run build` from the project root to produce a local bundle. The build verifies the upstream tdl v0.20.4 source archive against a pinned SHA-256 and compiles it with patches for QR sign-in, attachment browsing, and local video playback. The app includes the executable, license, upstream source archive, and the corresponding source changes. The Go sidecar manages the queue and runs tdl with its own data directory and Telegram session. [Upstream tdl release](https://github.com/iyear/tdl/releases/tag/v0.20.4)
-
-Existing installations with saved API credentials continue using their gotd session. To build with your own registered Telegram application, set `TG_NESTFETCH_TELEGRAM_APP_FILE` to the path of a private JSON file containing a numeric `apiId` and a string `apiHash`. The build embeds those credentials in the Go sidecar and keeps the input file out of the checkout. [Telegram developer tools](https://my.telegram.org/apps)
-
-| Platform | Bundle configuration | Release |
-| --- | --- | --- |
-| macOS | DMG | Available |
-| Windows | NSIS | Build target reserved |
-| Linux | DEB and AppImage | Build targets reserved |
+The build checks the SHA-256 of the upstream tdl archive and compiles tdl with patches for QR sign-in, attachment browsing, and local video streaming. The app bundles tdl's executable, license, and corresponding source. Builds using a registered Telegram application can set `TG_NESTFETCH_TELEGRAM_APP_FILE` to a private JSON file containing `apiId` and `apiHash`. [Telegram developer tools](https://my.telegram.org/apps)
 
 ## License
 
-TG NestFetch is distributed under the MIT License. The bundled tdl utility is distributed under the GNU Affero General Public License v3. [TG NestFetch license](LICENSE) · [tdl license and attribution](src-tauri/resources/tdl/NOTICE)
+TG NestFetch is licensed under [MIT](LICENSE). The separately bundled tdl utility is licensed under [AGPL-3.0](src-tauri/resources/tdl/LICENSE). [tdl source and attribution](src-tauri/resources/tdl/NOTICE)
