@@ -19,6 +19,7 @@ export type AccountState =
 
 export interface Account {
   state: AccountState;
+  preconfigured?: boolean;
   label?: string;
   qrUrl?: string;
   expires?: number;

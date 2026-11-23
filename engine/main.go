@@ -39,7 +39,7 @@ func runEngine() error {
 	}
 	defer lock.Close()
 
-	telegram, err := newTelegram(*dataDir)
+	telegram, err := newTelegram(*dataDir, releaseTelegramConfig)
 	if err != nil {
 		return err
 	}

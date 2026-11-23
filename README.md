@@ -7,18 +7,16 @@ Paste a Telegram message link and save the video to a folder you choose. TG Nest
 ## 安装与使用
 
 1. 从 [GitHub Releases](https://github.com/TNT-Likely/telegram-nestfetch/releases) 下载 macOS 13 或更新版本对应的 DMG。Apple 芯片使用 `aarch64`，Intel 芯片使用 `x64`。打开 DMG，将应用拖入「应用程序」。
-2. 首次使用时，在 [Telegram API development tools](https://my.telegram.org/apps) 创建 Telegram API 应用，然后填入 API ID 和 API Hash。也可以使用你已有的 Telegram API 应用凭据。两项信息只保存在本机。
-3. 在手机 Telegram 中打开「设置 → 设备 → 连接桌面设备」，扫描应用内的二维码。开启两步验证时，在应用内输入 Telegram 密码。
-4. 粘贴可访问的视频消息链接并下载。默认保存到「下载」，可选择本地目录或已挂载的网络目录。
+2. 从 v0.1.1 起，在官方安装包中点「打开登录二维码」。在手机 Telegram 中打开「设置 → 设备 → 连接桌面设备」，扫描应用内的二维码。开启两步验证时，在应用内输入 Telegram 密码。
+3. 粘贴可访问的视频消息链接并下载。默认保存到「下载」，可选择本地目录或已挂载的网络目录。
 
 当前 macOS 安装包采用临时签名。若 Gatekeeper 在首次启动时阻止打开，可在尝试启动后通过「系统设置 → 隐私与安全性 → 仍要打开」允许这一个应用。 [Apple 支持文档](https://support.apple.com/guide/mac-help/open-a-mac-app-from-an-unidentified-developer-mh40616/mac)
 
 ## Install and use
 
 1. Download the macOS 13+ DMG from [Releases](https://github.com/TNT-Likely/telegram-nestfetch/releases). Choose `aarch64` for Apple silicon or `x64` for an Intel Mac. Open the DMG and drag the app to Applications.
-2. Open [Telegram API development tools](https://my.telegram.org/apps) and enter your app's API ID and API Hash. You can use an existing Telegram API app. The credentials are stored locally.
-3. On your phone, open Telegram → Settings → Devices → Link Desktop Device and scan the code in TG NestFetch. Enter your Telegram password in the app if two-step verification is enabled.
-4. Paste an accessible video message link and start the download. The default destination is Downloads. You can choose a local folder or a mounted network folder.
+2. Select **Sign in with QR code** in the official v0.1.1 or later build. On your phone, open Telegram → Settings → Devices → Link Desktop Device and scan the code in TG NestFetch. Enter your Telegram password in the app if two-step verification is enabled.
+3. Paste an accessible video message link and start the download. The default destination is Downloads. You can choose a local folder or a mounted network folder.
 
 The macOS bundles are ad hoc signed. If Gatekeeper blocks the first launch, try opening the app once, then use System Settings → Privacy & Security → Open Anyway for this app. [Apple support](https://support.apple.com/guide/mac-help/open-a-mac-app-from-an-unidentified-developer-mh40616/mac)
 
@@ -48,9 +46,11 @@ go test -mod=readonly ./...
 
 Run `npm run build` from the project root to produce a local bundle. Tauri uses native folder selection and file-manager integration on each desktop OS. The Go sidecar handles the local queue and MTProto, and is compiled for the build target automatically.
 
+Source builds prompt for your own Telegram API ID and API Hash on first use. Release builders can set `TG_NESTFETCH_TELEGRAM_APP_FILE` to the path of a private JSON file containing a numeric `apiId` and a string `apiHash`. The build embeds the application's credentials in the sidecar and keeps the input file out of the source tree. Existing local API settings take precedence. [Telegram developer tools](https://my.telegram.org/apps)
+
 | Platform | Bundle configuration | Release |
 | --- | --- | --- |
-| macOS | App bundle and DMG | 0.1.0 |
+| macOS | App bundle and DMG | Available |
 | Windows | NSIS | Build target reserved |
 | Linux | DEB and AppImage | Build targets reserved |
 

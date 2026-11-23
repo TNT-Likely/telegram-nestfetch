@@ -22,11 +22,12 @@ type APIConfig struct {
 }
 
 type Account struct {
-	State   string   `json:"state"` // setup, disconnected, starting, qr, password, connected, error
-	Label   string   `json:"label,omitempty"`
-	QRURL   string   `json:"qrUrl,omitempty"`
-	Expires int64    `json:"expires,omitempty"` // Unix seconds
-	Error   *Failure `json:"error,omitempty"`
+	State         string   `json:"state"` // setup, disconnected, starting, qr, password, connected, error
+	Label         string   `json:"label,omitempty"`
+	QRURL         string   `json:"qrUrl,omitempty"`
+	Expires       int64    `json:"expires,omitempty"` // Unix seconds
+	Error         *Failure `json:"error,omitempty"`
+	Preconfigured bool     `json:"preconfigured,omitempty"`
 }
 
 type MessageLink struct {

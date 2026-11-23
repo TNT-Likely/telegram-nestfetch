@@ -141,7 +141,7 @@ func TestTelegramWireLoginCoverAndResumedTransfer(t *testing.T) {
 		t.Fatal("local MTProto fixture didn't start")
 	}
 	temp := t.TempDir()
-	local, err := newTelegram(temp)
+	local, err := newTelegram(temp, APIConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}

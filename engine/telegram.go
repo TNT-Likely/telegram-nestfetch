@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -42,18 +43,19 @@ type telegramRun struct {
 }
 
 type telegramProvider struct {
-	lifecycle sync.Mutex
-	mu        sync.Mutex
-	config    APIConfig
-	account   Account
-	run       *telegramRun
-	apiPath   string
-	storage   *telegramStorage
+	lifecycle     sync.Mutex
+	mu            sync.Mutex
+	config        APIConfig
+	account       Account
+	preconfigured bool
+	run           *telegramRun
+	apiPath       string
+	storage       *telegramStorage
 }
 
 var _ Telegram = (*telegramProvider)(nil)
 
-func newTelegram(dataDir string) (Telegram, error) {
+func newTelegram(dataDir string, defaults APIConfig) (Telegram, error) {
 	dir := filepath.Join(dataDir, "telegram")
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return nil, telegramFailure("disk_write_failed")
@@ -65,16 +67,23 @@ func newTelegram(dataDir string) (Telegram, error) {
 		storage: &telegramStorage{path: filepath.Join(dir, "session.json")},
 	}
 	data, err := os.ReadFile(provider.apiPath)
-	if errors.Is(err, fs.ErrNotExist) {
-		return provider, nil
-	}
-	if err != nil {
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		if !validTelegramConfig(defaults) {
+			return provider, nil
+		}
+		provider.config = defaults
+		provider.preconfigured = true
+		// Keep release sessions tied to the exact API application that authorized them.
+		provider.storage.path = filepath.Join(dir, "session-app-"+strconv.Itoa(defaults.APIID)+".json")
+	case err != nil:
 		return nil, telegramFailure("disk_write_failed")
-	}
-	if err := json.Unmarshal(data, &provider.config); err != nil || !validTelegramConfig(provider.config) {
-		provider.config = APIConfig{}
-		provider.account.Error = telegramFailure("config_invalid")
-		return provider, nil
+	default:
+		if err := json.Unmarshal(data, &provider.config); err != nil || !validTelegramConfig(provider.config) {
+			provider.config = APIConfig{}
+			provider.account.Error = telegramFailure("config_invalid")
+			return provider, nil
+		}
 	}
 
 	provider.account.State = "disconnected"
@@ -95,7 +104,9 @@ func validTelegramConfig(config APIConfig) bool {
 func (p *telegramProvider) Status() Account {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return p.account
+	account := p.account
+	account.Preconfigured = p.preconfigured
+	return account
 }
 
 func (p *telegramProvider) Configure(config APIConfig) error {
@@ -119,7 +130,8 @@ func (p *telegramProvider) Configure(config APIConfig) error {
 	}
 
 	// A different API application must never reuse an old authorization.
-	if err := p.storage.StoreSession(context.Background(), nil); err != nil {
+	storage := &telegramStorage{path: filepath.Join(filepath.Dir(p.apiPath), "session.json")}
+	if err := storage.StoreSession(context.Background(), nil); err != nil {
 		return telegramFailure("disk_write_failed")
 	}
 	if err := writePrivateFile(p.apiPath, func(w io.Writer) error {
@@ -130,6 +142,8 @@ func (p *telegramProvider) Configure(config APIConfig) error {
 
 	p.mu.Lock()
 	p.config = config
+	p.preconfigured = false
+	p.storage = storage
 	p.account = Account{State: "disconnected"}
 	p.mu.Unlock()
 	return nil
@@ -176,7 +190,7 @@ func (p *telegramProvider) start(restore bool) {
 		Device: telegram.DeviceConfig{
 			DeviceModel:   "TG NestFetch",
 			SystemVersion: runtime.GOOS + "/" + runtime.GOARCH,
-			AppVersion:    "0.1.0",
+			AppVersion:    "0.1.1",
 		},
 		DialTimeout:  8 * time.Second,
 		FilePoolSize: 2,

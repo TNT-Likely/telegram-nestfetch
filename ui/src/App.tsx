@@ -214,6 +214,10 @@ export function App() {
   function openAccount() {
     setAccountError(undefined);
     setAccountOpen(true);
+    const account = snapshot?.account;
+    if (account?.preconfigured && account.state === 'disconnected' && !account.error) {
+      void run(startLogin, setAccountError);
+    }
   }
 
   async function startLogin() {

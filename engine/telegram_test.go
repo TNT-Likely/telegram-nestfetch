@@ -18,7 +18,7 @@ import (
 
 func TestTelegramConfigIsLocalAndDoesNotSignIn(t *testing.T) {
 	root := t.TempDir()
-	provider, err := newTelegram(root)
+	provider, err := newTelegram(root, APIConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,13 +47,48 @@ func TestTelegramConfigIsLocalAndDoesNotSignIn(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(privateDir, "session.json")); !os.IsNotExist(err) {
 		t.Fatal("configuration unexpectedly created a session")
 	}
-	reloaded, err := newTelegram(root)
+	reloaded, err := newTelegram(root, APIConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer reloaded.Close()
 	if reloaded.Status().State != "disconnected" {
 		t.Fatal("reloading did not restore configuration")
+	}
+}
+
+func TestTelegramReleaseDefaultsAndLocalOverride(t *testing.T) {
+	root := t.TempDir()
+	defaults := APIConfig{APIID: 100001, APIHash: strings.Repeat("a", 32)}
+	provider, err := newTelegram(root, defaults)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer provider.Close()
+	account := provider.Status()
+	if account.State != "disconnected" || !account.Preconfigured {
+		t.Fatalf("expected a release install ready to sign in: %+v", account)
+	}
+	p := provider.(*telegramProvider)
+	if p.config != defaults || filepath.Base(p.storage.path) != "session-app-100001.json" {
+		t.Fatal("release session is not tied to the built-in Telegram application")
+	}
+	if _, err := os.Stat(p.apiPath); !os.IsNotExist(err) {
+		t.Fatal("starting a release install wrote application credentials to the user settings")
+	}
+
+	custom := APIConfig{APIID: 100002, APIHash: strings.Repeat("b", 32)}
+	if err := provider.Configure(custom); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err := newTelegram(root, defaults)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reloaded.Close()
+	if reloaded.Status().Preconfigured || reloaded.(*telegramProvider).config != custom ||
+		filepath.Base(reloaded.(*telegramProvider).storage.path) != "session.json" {
+		t.Fatal("the release defaults replaced existing local application settings")
 	}
 }
 
@@ -80,7 +115,7 @@ func TestTelegramSessionStorageReplacement(t *testing.T) {
 }
 
 func TestTelegramCancelRestoringPreservesSession(t *testing.T) {
-	local, err := newTelegram(t.TempDir())
+	local, err := newTelegram(t.TempDir(), APIConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
