@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main",
+  "description": "The local app window can synchronize native window appearance.",
+  "windows": ["main"],
+  "permissions": ["core:window:allow-set-theme"]
+}

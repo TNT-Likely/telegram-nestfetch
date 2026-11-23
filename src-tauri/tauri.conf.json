@@ -1,0 +1,59 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "TG NestFetch",
+  "version": "0.1.0",
+  "identifier": "com.tntlikely.tgnestfetch",
+  "build": {
+    "beforeDevCommand": "npm run build:engine && npm --prefix ui run dev",
+    "beforeBuildCommand": "npm run build:engine && npm --prefix ui run build",
+    "devUrl": "http://127.0.0.1:1420",
+    "frontendDist": "../ui/dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "TG NestFetch",
+        "width": 960,
+        "height": 680,
+        "minWidth": 580,
+        "minHeight": 480,
+        "center": true
+      }
+    ],
+    "security": {
+      "capabilities": ["main"],
+      "csp": {
+        "default-src": "'self'",
+        "script-src": "'self'",
+        "style-src": "'self' 'unsafe-inline'",
+        "img-src": "'self' data:",
+        "connect-src": "'self' ipc: http://ipc.localhost",
+        "object-src": "'none'",
+        "base-uri": "'none'",
+        "form-action": "'none'"
+      },
+      "devCsp": {
+        "default-src": "'self'",
+        "script-src": "'self' 'unsafe-inline'",
+        "style-src": "'self' 'unsafe-inline'",
+        "img-src": "'self' data:",
+        "connect-src": "'self' ipc: http://ipc.localhost ws://127.0.0.1:1420",
+        "object-src": "'none'",
+        "base-uri": "'none'",
+        "form-action": "'none'"
+      }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "externalBin": ["binaries/nestfetch-engine"],
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
+    "category": "Utilities",
+    "shortDescription": "Desktop video downloader for Telegram",
+    "longDescription": "An independent desktop application for saving videos from Telegram message links using the Telegram API.",
+    "license": "MIT",
+    "licenseFile": "../LICENSE",
+    "publisher": "TNT-Likely"
+  }
+}

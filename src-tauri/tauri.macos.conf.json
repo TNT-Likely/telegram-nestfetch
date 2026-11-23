@@ -1,0 +1,14 @@
+{
+  "bundle": {
+    "targets": ["app", "dmg"],
+    "resources": {"resources/tg-nestfetch-frame": "tg-nestfetch-frame"},
+    "macOS": {
+      "minimumSystemVersion": "13.0",
+      "dmg": {
+        "windowSize": { "width": 600, "height": 385 },
+        "appPosition": { "x": 175, "y": 174 },
+        "applicationFolderPosition": { "x": 425, "y": 174 }
+      }
+    }
+  }
+}

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>NSDownloadsFolderUsageDescription</key>
+  <string>TG NestFetch saves your downloaded videos in Downloads when you choose that folder.</string>
+  <key>NSNetworkVolumesUsageDescription</key>
+  <string>TG NestFetch saves your downloaded videos on a network volume when you choose a folder there.</string>
+</dict>
+</plist>
