@@ -38,12 +38,15 @@ export type JobState =
   | 'completed'
   | 'failed';
 
+export type MediaKind = 'video' | 'image' | 'audio' | 'file';
+
 export interface Job {
   id: string;
   url: string;
   title: string;
   source: string;
   name: string;
+  kind?: MediaKind;
   size: number;
   duration: number;
   downloaded: number;
@@ -54,6 +57,40 @@ export interface Job {
   error?: Failure;
   hasThumbnail: boolean;
 }
+
+export interface Channel {
+  id: string;
+  title: string;
+  username?: string;
+}
+
+export interface Attachment {
+  url: string;
+  title: string;
+  name: string;
+  kind: MediaKind;
+  size: number;
+  date: number;
+  duration: number;
+  thumbnail?: string;
+}
+
+export interface AttachmentQuery {
+  channel: string;
+  from: number;
+  to: number;
+}
+
+export interface BatchResult {
+  added: number;
+  duplicates: number;
+}
+
+interface TaskReference { id: string }
+type TaskStatus<Result> =
+  | { state: 'loading'; waiting?: boolean }
+  | { state: 'failed'; error?: Failure }
+  | ({ state: 'ready' } & Result);
 
 export interface Snapshot {
   account: Account;
@@ -70,6 +107,15 @@ interface EngineMethods {
   sign_out: [undefined, null];
   set_folder: [{ folder: string }, null];
   enqueue: [{ url: string }, null];
+  enqueue_batch: [{ urls: string[] }, BatchResult];
+  channels_start: [undefined, TaskReference];
+  channels_status: [TaskReference, TaskStatus<{ channels: Channel[] }>];
+  attachments_start: [AttachmentQuery & { before?: number }, TaskReference];
+  attachments_status: [TaskReference, TaskStatus<{ items: Attachment[]; nextBefore?: number }>];
+  browse_cancel: [TaskReference, null];
+  preview_start: [{ url: string }, TaskReference];
+  preview_status: [TaskReference, TaskStatus<{ url: string }>];
+  preview_stop: [TaskReference, null];
   pause: [{ id: string }, null];
   resume: [{ id: string }, null];
   retry: [{ id: string }, null];
@@ -79,6 +125,33 @@ interface EngineMethods {
 
 export function request<M extends keyof EngineMethods>(method: M, params: EngineMethods[M][0]) {
   return invoke<EngineMethods[M][1]>('engine_request', { method, params });
+}
+
+export function startTask<Result>(
+  start: () => Promise<TaskReference>,
+  poll: (reference: TaskReference) => Promise<TaskStatus<Result>>,
+  cancel: (reference: TaskReference) => Promise<null>,
+  onWaiting: (waiting: boolean) => void,
+) {
+  const reference = start();
+  let stopping: Promise<void> | undefined;
+  const result = reference.then(async id => {
+    while (!stopping) {
+      const status = await poll(id);
+      if (stopping) return;
+      if (status.state === 'ready') return status;
+      if (status.state === 'failed') throw status.error ?? { code: 'unexpected' };
+      onWaiting(Boolean(status.waiting));
+      await new Promise(resolve => window.setTimeout(resolve, 420));
+    }
+  });
+  return {
+    result,
+    stop() {
+      stopping ??= reference.then(cancel).then(() => undefined, () => undefined);
+      return stopping;
+    },
+  };
 }
 
 export function chooseFolder(initial: string) {
@@ -91,6 +164,10 @@ export function revealJob(id: string) {
 
 export function openTelegramSettings() {
   return invoke<void>('open_telegram_settings');
+}
+
+export function openProjectRepository() {
+  return invoke<void>('open_project_repository');
 }
 
 export async function setWindowTheme(theme: Theme) {

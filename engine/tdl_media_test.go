@@ -82,8 +82,10 @@ func TestTDLRawArchivePinsExactMessageAndVideo(t *testing.T) {
 		&tg.DocumentAttributeImageSize{W: 120, H: 72},
 	}
 	archive = encodeTestTDL(t, tdlFixtureChannel, tdlFixtureMessage, "audio.mp3", raw)
-	_, err = decodeTDLArchive(archive, link)
-	expectCode(t, err, "no_video")
+	audio, err := decodeTDLArchive(archive, link)
+	if err != nil || audio.media.Kind != MediaAudio || audio.media.Name != "audio.mp3" || audio.media.Duration != 5 {
+		t.Fatalf("audio metadata mismatch: %+v %v", audio.media, err)
+	}
 }
 
 func TestTDLCoverAndProtection(t *testing.T) {
@@ -194,17 +196,17 @@ case "$action" in
       *) exit 5 ;;
     esac
     case "$SCENARIO" in
-      incomplete) printf 'only prefix' > "$to/nestfetch-video" ;;
+      incomplete) printf 'only prefix' > "$to/nestfetch-file" ;;
       skipped) printf 'No source remained\n' ;;
       extra)
-        cp fixture.mp4 "$to/nestfetch-video"
+        cp fixture.mp4 "$to/nestfetch-file"
         cp fixture.mp4 "$to/another-file" ;;
       cancel)
         trap 'exit 1' INT TERM
-        printf 'only prefix' > "$to/nestfetch-video.tmp"
+        printf 'only prefix' > "$to/nestfetch-file.tmp"
         while true; do sleep 0.1; done ;;
       *)
-        cp fixture.mp4 "$to/nestfetch-video"
+        cp fixture.mp4 "$to/nestfetch-file"
         touch downloaded ;;
     esac ;;
   *) exit 4 ;;

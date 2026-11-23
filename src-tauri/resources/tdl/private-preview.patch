@@ -1,0 +1,263 @@
+diff --git a/app/dl/nestfetch_preview.go b/app/dl/nestfetch_preview.go
+new file mode 100644
+index 0000000..6baa5be
+--- /dev/null
++++ b/app/dl/nestfetch_preview.go
+@@ -0,0 +1,144 @@
++package dl
++
++import (
++	"context"
++	"errors"
++	"fmt"
++	"io"
++	"mime"
++	"strings"
++	"time"
++
++	"github.com/gotd/contrib/partio"
++	"github.com/gotd/contrib/tg_io"
++	"github.com/gotd/td/telegram"
++	"github.com/gotd/td/telegram/downloader"
++	"github.com/gotd/td/telegram/peers"
++	"github.com/gotd/td/tg"
++
++	"github.com/iyear/tdl/core/storage"
++	preview "github.com/iyear/tdl/internal/nestfetchpreview"
++)
++
++var (
++	errPreviewProtected   = errors.New("CHAT_FORWARDS_RESTRICTED")
++	errPreviewUnavailable = errors.New("NESTFETCH_PREVIEW_UNAVAILABLE")
++	errPreviewChanged     = errors.New("NESTFETCH_PREVIEW_MEDIA_CHANGED")
++)
++
++// NestFetchPreview exposes only the inspected video and holds no media on disk.
++func NestFetchPreview(ctx context.Context, client *telegram.Client, kvd storage.Storage,
++	channelID int64, messageID int, documentID, size int64, status io.Writer) error {
++	api := client.API()
++	manager := peers.Options{Storage: storage.NewPeers(kvd)}.Build(api)
++
++	lookup, cancel := context.WithTimeout(ctx, 20*time.Second)
++	defer cancel()
++	channel, err := manager.ResolveChannelID(lookup, channelID)
++	if err != nil {
++		return err
++	}
++	if channel.Raw().Noforwards {
++		return errPreviewProtected
++	}
++	input := channel.Raw().AsInput()
++	refresh := func(ctx context.Context) (partio.ChunkSource, string, error) {
++		doc, contentType, err := lookupPreviewVideo(ctx, api, input, messageID, documentID, size)
++		if err != nil {
++			return nil, "", err
++		}
++		invoker, err := client.FileDC(ctx, doc.DCID)
++		if err != nil {
++			return nil, "", err
++		}
++		source := tg_io.NewDownloader(tg.NewClient(invoker)).ChunkSource(size, &tg.InputDocumentFileLocation{
++			ID: doc.ID, AccessHash: doc.AccessHash, FileReference: doc.FileReference,
++		})
++		return source, contentType, nil
++	}
++	source, contentType, err := refresh(lookup)
++	cancel()
++	if err != nil {
++		return err
++	}
++	read := func(ctx context.Context, offset int64, block []byte) (int, error) {
++		n, err := source.Chunk(ctx, offset, block)
++		if !downloader.IsFileReferenceError(err) {
++			return int(n), err
++		}
++		next, nextType, err := refresh(ctx)
++		if err != nil {
++			return 0, err
++		}
++		if nextType != contentType {
++			return 0, errPreviewChanged
++		}
++		source = next
++		n, err = source.Chunk(ctx, offset, block)
++		return int(n), err
++	}
++	return preview.Serve(ctx, size, contentType, read, func(address string) error {
++		_, err := fmt.Fprintln(status, "NESTFETCH_PREVIEW "+address)
++		return err
++	})
++}
++
++func lookupPreviewVideo(ctx context.Context, api *tg.Client, channel *tg.InputChannel, messageID int, documentID, size int64) (*tg.Document, string, error) {
++	reply, err := api.ChannelsGetMessages(ctx, &tg.ChannelsGetMessagesRequest{
++		Channel: channel, ID: []tg.InputMessageClass{&tg.InputMessageID{ID: messageID}},
++	})
++	if err != nil {
++		return nil, "", err
++	}
++	result, ok := reply.AsModified()
++	if !ok {
++		return nil, "", errPreviewChanged
++	}
++	for _, chat := range result.GetChats() {
++		if ch, ok := chat.(*tg.Channel); ok && ch.ID == channel.ChannelID && ch.Noforwards {
++			return nil, "", errPreviewProtected
++		}
++	}
++	for _, entry := range result.GetMessages() {
++		msg, ok := entry.(*tg.Message)
++		if !ok || msg.ID != messageID {
++			continue
++		}
++		if peer, ok := msg.PeerID.(*tg.PeerChannel); ok && peer.ChannelID == channel.ChannelID {
++			return previewDocument(msg, documentID, size)
++		}
++	}
++	return nil, "", errPreviewChanged
++}
++
++func previewDocument(msg *tg.Message, documentID, size int64) (*tg.Document, string, error) {
++	if _, timed := msg.GetTTLPeriod(); msg.Noforwards || timed || msg.TTLPeriod != 0 {
++		return nil, "", errPreviewProtected
++	}
++	attachment, ok := msg.Media.(*tg.MessageMediaDocument)
++	if !ok {
++		return nil, "", errPreviewUnavailable
++	}
++	if _, timed := attachment.GetTTLSeconds(); attachment.Spoiler || timed || attachment.TTLSeconds != 0 {
++		return nil, "", errPreviewProtected
++	}
++	doc, ok := attachment.Document.(*tg.Document)
++	if !ok || doc.ID != documentID || doc.Size != size {
++		return nil, "", errPreviewChanged
++	}
++	mimeType, _, _ := mime.ParseMediaType(doc.MimeType)
++	video := attachment.Video || attachment.Round || strings.HasPrefix(mimeType, "video/")
++	name := ""
++	for _, attr := range doc.Attributes {
++		switch value := attr.(type) {
++		case *tg.DocumentAttributeVideo:
++			video = true
++		case *tg.DocumentAttributeFilename:
++			name = value.FileName
++		}
++	}
++	if !video {
++		return nil, "", errPreviewUnavailable
++	}
++	return doc, preview.ContentType(mimeType, name), nil
++}
+diff --git a/app/dl/nestfetch_preview_test.go b/app/dl/nestfetch_preview_test.go
+new file mode 100644
+index 0000000..d4e64fc
+--- /dev/null
++++ b/app/dl/nestfetch_preview_test.go
+@@ -0,0 +1,45 @@
++package dl
++
++import (
++	"errors"
++	"testing"
++
++	"github.com/gotd/td/tg"
++)
++
++func TestNestFetchPreviewOnlyAcceptsExpectedOrdinaryVideos(t *testing.T) {
++	for _, check := range []struct {
++		name   string
++		change func(*tg.Message, *tg.MessageMediaDocument, *tg.Document)
++		want   error
++	}{
++		{name: "video with generic Telegram MIME", change: func(*tg.Message, *tg.MessageMediaDocument, *tg.Document) {}},
++		{name: "different attachment", change: func(_ *tg.Message, _ *tg.MessageMediaDocument, d *tg.Document) { d.ID++ }, want: errPreviewChanged},
++		{name: "different size", change: func(_ *tg.Message, _ *tg.MessageMediaDocument, d *tg.Document) { d.Size++ }, want: errPreviewChanged},
++		{name: "forward protection", change: func(m *tg.Message, _ *tg.MessageMediaDocument, _ *tg.Document) { m.Noforwards = true }, want: errPreviewProtected},
++		{name: "message timer", change: func(m *tg.Message, _ *tg.MessageMediaDocument, _ *tg.Document) { m.SetTTLPeriod(0) }, want: errPreviewProtected},
++		{name: "attachment timer", change: func(_ *tg.Message, a *tg.MessageMediaDocument, _ *tg.Document) { a.SetTTLSeconds(0) }, want: errPreviewProtected},
++		{name: "spoiler", change: func(_ *tg.Message, a *tg.MessageMediaDocument, _ *tg.Document) { a.Spoiler = true }, want: errPreviewProtected},
++		{name: "nonvideo", change: func(_ *tg.Message, _ *tg.MessageMediaDocument, d *tg.Document) { d.Attributes = nil }, want: errPreviewUnavailable},
++	} {
++		t.Run(check.name, func(t *testing.T) {
++			d := &tg.Document{
++				ID: 3, Size: 100, MimeType: "application/octet-stream",
++				Attributes: []tg.DocumentAttributeClass{
++					&tg.DocumentAttributeFilename{FileName: "sample.webm"},
++					&tg.DocumentAttributeVideo{},
++				},
++			}
++			a := &tg.MessageMediaDocument{Document: d}
++			m := &tg.Message{Media: a}
++			check.change(m, a, d)
++			got, mime, err := previewDocument(m, 3, 100)
++			if !errors.Is(err, check.want) {
++				t.Fatalf("got %v, want %v", err, check.want)
++			}
++			if check.want == nil && (got != d || mime != "video/webm") {
++				t.Fatal("the pinned WebM video was not accepted")
++			}
++		})
++	}
++}
+diff --git a/cmd/nestfetch_preview.go b/cmd/nestfetch_preview.go
+new file mode 100644
+index 0000000..79f5bfa
+--- /dev/null
++++ b/cmd/nestfetch_preview.go
+@@ -0,0 +1,43 @@
++package cmd
++
++import (
++	"context"
++	"fmt"
++	"io"
++	"strconv"
++
++	"github.com/gotd/td/telegram"
++	"github.com/spf13/cobra"
++
++	"github.com/iyear/tdl/app/dl"
++	"github.com/iyear/tdl/core/storage"
++)
++
++func newNestFetchPreview() *cobra.Command {
++	return &cobra.Command{
++		Use:    "nestfetch-preview CHANNEL MESSAGE DOCUMENT SIZE",
++		Hidden: true,
++		Args:   cobra.ExactArgs(4),
++		RunE: func(cmd *cobra.Command, args []string) error {
++			channel, err1 := strconv.ParseInt(args[0], 10, 64)
++			message, err2 := strconv.ParseInt(args[1], 10, 32)
++			document, err3 := strconv.ParseInt(args[2], 10, 64)
++			size, err4 := strconv.ParseInt(args[3], 10, 64)
++			if err1 != nil || err2 != nil || err3 != nil || err4 != nil ||
++				channel <= 0 || message <= 0 || document == 0 || size <= 0 {
++				return fmt.Errorf("invalid preview request")
++			}
++
++			ctx, cancel := context.WithCancel(cmd.Context())
++			defer cancel()
++			// EOF ends the stream even if the desktop engine exits abruptly.
++			go func() {
++				_, _ = io.Copy(io.Discard, cmd.InOrStdin())
++				cancel()
++			}()
++			return tRun(ctx, func(ctx context.Context, client *telegram.Client, kvd storage.Storage) error {
++				return dl.NestFetchPreview(ctx, client, kvd, channel, int(message), document, size, cmd.OutOrStdout())
++			})
++		},
++	}
++}
+diff --git a/cmd/root.go b/cmd/root.go
+index b268dd5..b859171 100644
+--- a/cmd/root.go
++++ b/cmd/root.go
+@@ -139,7 +139,7 @@ func New() *cobra.Command {
+ 
+ 	cmd.AddCommand(NewVersion(), NewLogin(), NewDownload(), NewForward(),
+ 		NewChat(), NewUpload(), NewBackup(), NewRecover(), NewMigrate(),
+-		NewGen(), NewExtension(em))
++		NewGen(), NewExtension(em), newNestFetchPreview())
+ 
+ 	// append extension command to root
+ 	exts, _ := em.List(context.Background(), false)

@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowDown, CircleCheck, Film, FolderOpen, HardDriveDownload, Pause, Play, RotateCcw } from 'lucide-react';
+import { ArrowDown, CircleCheck, FolderOpen, HardDriveDownload, Pause, Play, RotateCcw } from 'lucide-react';
 import { imageSource, request } from './api';
 import type { Job } from './api';
 import { failureText } from './i18n';
 import type { Language, Translate } from './i18n';
+import { duration, filesize, MediaArtwork } from './MediaArtwork';
 
 export type View = 'all' | 'active' | 'completed';
 export type JobAction = 'pause' | 'resume' | 'retry' | 'save_elsewhere' | 'reveal';
@@ -17,26 +18,6 @@ export function countByView(jobs: Job[], view: View) {
 
 function inView(job: Job, view: View) {
   return view === 'all' || (view === 'completed' ? job.state === 'completed' : job.state !== 'completed');
-}
-
-function filesize(bytes: number) {
-  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-  if (!Number.isFinite(bytes)) return '—';
-  let size = Math.max(0, bytes);
-  let index = 0;
-  while (size >= 1000 && index < units.length - 1) {
-    size /= 1000;
-    index++;
-  }
-  return size.toFixed(index ? 1 : 0) + ' ' + units[index];
-}
-
-function duration(seconds: number) {
-  if (!Number.isFinite(seconds) || seconds <= 0) return null;
-  const whole = Math.floor(seconds);
-  const values: number[] = [Math.floor(whole / 60) % 60, whole % 60];
-  if (whole >= 3600) values.unshift(Math.floor(whole / 3600));
-  return values.map(value => String(value).padStart(2, '0')).join(':');
 }
 
 function useCover(id: string, hasThumbnail: boolean) {
@@ -81,13 +62,6 @@ function useCover(id: string, hasThumbnail: boolean) {
   return { element, cover: hasThumbnail && loaded?.id === id ? loaded.source : undefined };
 }
 
-function MediaImage({ cover }: { cover?: string }) {
-  const [failed, setFailed] = useState<string>();
-  return cover && failed !== cover
-    ? <img alt="" draggable={false} src={cover} onError={() => setFailed(cover)} />
-    : <Film className="film-placeholder" aria-hidden="true" />;
-}
-
 interface JobProps {
   job: Job;
   t: Translate;
@@ -99,7 +73,7 @@ interface JobProps {
 }
 
 function jobTitle(job: Job, t: Translate) {
-  return job.title || job.name || t('telegramVideo');
+  return job.title || job.name || t('telegramAttachment');
 }
 
 function Status({ job, t }: Pick<JobProps, 'job' | 't'>) {
@@ -137,7 +111,7 @@ function FeaturedJob({ job, t, resumeRestarts, busy, onAction }: JobProps) {
   return (
     <article className="feature" data-state={job.state} aria-labelledby="featured-title">
       <div className="feature-still" ref={element}>
-        <MediaImage cover={cover} />
+        <MediaArtwork cover={cover} kind={job.kind} />
         <div className="feature-top">
           <Status job={job} t={t} />
           {seconds && <span className="duration">{seconds}</span>}
@@ -184,7 +158,7 @@ function DownloadRow({ job, t, language, connected, resumeRestarts, busy, onActi
   return (
     <li className="download-row" data-state={job.state}>
       <div className="thumb" ref={element} aria-hidden="true">
-        <MediaImage cover={cover} />
+        <MediaArtwork cover={cover} kind={job.kind} />
         {seconds && <span className="duration">{seconds}</span>}
       </div>
       <div className="row-body">

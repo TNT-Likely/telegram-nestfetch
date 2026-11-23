@@ -8,6 +8,8 @@ import (
 	"image"
 	"image/color"
 	imagejpeg "image/jpeg"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sync/atomic"
@@ -208,6 +210,42 @@ func TestTelegramWireLoginCoverAndResumedTransfer(t *testing.T) {
 	}
 	if firstVideoOffset.Load() != telegramPartSize || finalProgress != int64(len(fileBytes)) {
 		t.Fatalf("incorrect resume or progress: first offset %d, final size %d", firstVideoOffset.Load(), finalProgress)
+	}
+	previewCtx, endPreview := context.WithCancel(ctx)
+	defer endPreview()
+	ready := make(chan string, 1)
+	previewDone := make(chan error, 1)
+	go func() {
+		previewDone <- p.Preview(previewCtx, link, func(address string) { ready <- address })
+	}()
+	var address string
+	select {
+	case address = <-ready:
+	case err := <-previewDone:
+		t.Fatalf("could not open the preview: %v", err)
+	case <-ctx.Done():
+		t.Fatal("timed out opening the preview")
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, address, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const startByte, endByte = telegramPartSize - 2, telegramPartSize + 2
+	request.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", startByte, endByte-1))
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	previewBytes, err := io.ReadAll(response.Body)
+	response.Body.Close()
+	if err != nil || response.StatusCode != http.StatusPartialContent || !bytes.Equal(previewBytes, fileBytes[startByte:endByte]) {
+		t.Fatalf("incorrect Telegram preview range: HTTP %d, bytes %d, error %v", response.StatusCode, len(previewBytes), err)
+	}
+	endPreview()
+	select {
+	case <-previewDone:
+	case <-ctx.Done():
+		t.Fatal("preview remained open after cancellation")
 	}
 	p.Close()
 	start(true)

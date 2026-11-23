@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
-import { ArrowDownToLine, ChevronDown, ChevronRight, CircleCheck, Folder, Layers, Link2, Monitor, Moon, Send, Sun, X } from 'lucide-react';
+import { ArrowDownToLine, ArrowUpRight, ChevronDown, ChevronRight, CircleCheck, Folder, Layers, Library, Link2, Monitor, Moon, Play, Send, Sun, X } from 'lucide-react';
 import { AccountDialog } from './AccountDialog';
+import { ChannelAttachments } from './ChannelAttachments';
 import { countByView, Downloads } from './Downloads';
 import type { JobAction, View } from './Downloads';
-import { chooseFolder, failureOf, openTelegramSettings, request, revealJob, setWindowTheme } from './api';
-import type { Account, Failure, Job, Snapshot, Theme } from './api';
+import { VideoPreview } from './VideoPreview';
+import type { PreviewTarget } from './VideoPreview';
+import { chooseFolder, failureOf, openProjectRepository, openTelegramSettings, request, revealJob, setWindowTheme } from './api';
+import type { Account, BatchResult, Failure, Job, Snapshot, Theme } from './api';
 import { failureText, translator } from './i18n';
 import type { Language, Translate } from './i18n';
 
@@ -22,6 +25,7 @@ const filters = [
 ] as const;
 const signingIn = new Set<Account['state']>(['starting', 'qr', 'password']);
 const running = new Set<Job['state']>(['queued', 'resolving', 'downloading', 'saving']);
+type WorkspaceView = View | 'channels';
 
 interface Preferences {
   language: Language;
@@ -141,11 +145,11 @@ function ProductName({ t }: { t: Translate }) {
 }
 
 interface SidebarProps {
-  view: View;
+  view: WorkspaceView;
   jobs: Job[];
   account: Account | undefined;
   t: Translate;
-  onView: (view: View) => void;
+  onView: (view: WorkspaceView) => void;
   onAccount: () => void;
 }
 
@@ -165,6 +169,9 @@ function Sidebar({ view, jobs, account, t, onView, onAccount }: SidebarProps) {
             <span className="count">{countByView(jobs, key)}</span>
           </button>
         ))}
+        <button className="nav-item channel-nav" type="button" aria-pressed={view === 'channels'} onClick={() => onView('channels')}>
+          <Library aria-hidden="true" /><span>{t('channelAttachments')}</span>
+        </button>
       </nav>
       <button className="account-button" type="button" aria-label={t('account')} aria-haspopup="dialog" disabled={!account} onClick={onAccount}>
         <span className="account-icon"><Send aria-hidden="true" /></span>
@@ -183,14 +190,15 @@ export function App() {
   const compact = useMediaMatch('(max-width: 430px)');
   const t = translator(preferences.language);
   const { snapshot, failure: engineFailure, refresh } = useEngine();
-  const [view, setView] = useState<View>('all');
+  const [view, setView] = useState<WorkspaceView>('all');
   const [link, setLink] = useState('');
   const [busy, setBusy] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const [appError, setAppError] = useState<Failure>();
   const [linkError, setLinkError] = useState<Failure>();
   const [accountError, setAccountError] = useState<Failure>();
-  const [notice, setNotice] = useState<'added' | 'folderChanged'>();
+  const [notice, setNotice] = useState<'added' | 'folderChanged' | BatchResult>();
+  const [preview, setPreview] = useState<PreviewTarget>();
   const input = useRef<HTMLInputElement>(null);
   const actionLock = useRef(false);
   const loginRequested = useRef(false);
@@ -200,6 +208,10 @@ export function App() {
     const timer = window.setTimeout(() => setNotice(undefined), 3500);
     return () => window.clearTimeout(timer);
   }, [notice]);
+
+  useEffect(() => {
+    if (snapshot?.account.state !== 'connected' || accountOpen) setPreview(undefined);
+  }, [snapshot?.account.state, accountOpen]);
 
   async function run(task: () => Promise<void>, setError: (failure: Failure | undefined) => void = setAppError, fallback = 'unexpected') {
     if (actionLock.current) return false;
@@ -275,6 +287,26 @@ export function App() {
     else input.current?.focus();
   }
 
+  function openPreview(target: PreviewTarget) {
+    if (snapshot?.account.state === 'connected') setPreview(target);
+    else openAccount();
+  }
+
+  async function addFromPreview(url: string) {
+    let issue: Failure | undefined;
+    const succeeded = await run(async () => { await request('enqueue', { url }); }, failure => { issue = failure; });
+    if (!succeeded) return issue ?? { code: 'busy' };
+    if (view !== 'channels') {
+      setView('all');
+      setLink(current => current.trim() === url ? '' : current);
+    }
+    setNotice('added');
+  }
+
+  function addBatch(urls: string[]) {
+    return run(async () => { setNotice(await request('enqueue_batch', { urls })); });
+  }
+
   async function setFolder() {
     await run(async () => {
       const folder = await chooseFolder(snapshot?.settings.folder || '');
@@ -304,7 +336,16 @@ export function App() {
   const leaf = folder?.replace(/[/\\]+$/, '').split(/[/\\]/).pop();
   const folderName = leaf === 'Downloads' ? t('defaultFolder') : leaf || folder || t('defaultFolder');
   const displayedError = engineFailure || appError;
-  const heading = view === 'all' ? t('downloads') : t(view);
+  const heading = t(view === 'channels' ? 'channelAttachments' : view === 'all' ? 'downloads' : view);
+  const destination = (
+    <button type="button" className="destination" title={folder || t('chooseFolder')} disabled={busy || !snapshot} onClick={() => { void setFolder(); }}>
+      <Folder aria-hidden="true" /><span>{t('saveTo')}</span><b>{folderName}</b><ChevronDown aria-hidden="true" />
+    </button>
+  );
+  const notification = typeof notice === 'string' ? t(notice) : notice && [
+    notice.added > 0 && t('batchAdded').replace('{count}', String(notice.added)),
+    notice.duplicates > 0 && t('batchDuplicates').replace('{count}', String(notice.duplicates)),
+  ].filter(Boolean).join(' ');
 
   return (
     <div className="app">
@@ -324,11 +365,15 @@ export function App() {
               <button type="button" lang="zh-CN" aria-label="简体中文" aria-pressed={preferences.language === 'zh'} onClick={() => setPreferences({ ...preferences, language: 'zh' })}>中文</button>
               <button type="button" lang="en" aria-label="English" aria-pressed={preferences.language === 'en'} onClick={() => setPreferences({ ...preferences, language: 'en' })}>EN</button>
             </div>
+            <button className="project-link" type="button" title={t('projectRepository')} aria-label={t('projectRepository')}
+              onClick={() => { void openProjectRepository().catch(error => setAppError(failureOf(error, 'open_failed'))); }}>
+              <span>GitHub</span><ArrowUpRight aria-hidden="true" />
+            </button>
           </div>
         </header>
         <div className="workspace-content">
           <h1>{heading}</h1>
-          <form className="composer-form" onSubmit={addDownload} noValidate>
+          {view !== 'channels' && <form className="composer-form" onSubmit={addDownload} noValidate>
             <div className="composer" data-invalid={linkError?.code === 'invalid_link'}>
               <Link2 aria-hidden="true" />
               <input
@@ -345,15 +390,16 @@ export function App() {
                 autoCapitalize="off"
                 spellCheck={false}
               />
+              <button className="preview-button row-action" type="button" aria-label={t('preview')} title={t('preview')} aria-haspopup="dialog" disabled={busy || !snapshot || !link.trim()} onClick={() => openPreview({ url: link.trim() })}>
+                <Play aria-hidden="true" /><span>{t('preview')}</span>
+              </button>
               <button className="primary-button download-button" type="submit" disabled={busy || !snapshot}>
                 <ArrowDownToLine aria-hidden="true" /><span>{t('download')}</span>
               </button>
             </div>
             {linkError && <p className="form-error" id="link-error" role="alert">{failureText(preferences.language, linkError.code)}</p>}
-            <button type="button" className="destination" title={folder || t('chooseFolder')} disabled={busy || !snapshot} onClick={() => { void setFolder(); }}>
-              <Folder aria-hidden="true" /><span>{t('saveTo')}</span><b>{folderName}</b><ChevronDown aria-hidden="true" />
-            </button>
-          </form>
+            {destination}
+          </form>}
           {displayedError && (
             <div role="alert" className="error-banner">
               <span>{failureText(preferences.language, displayedError.code)}</span>
@@ -370,12 +416,18 @@ export function App() {
               <button className="secondary-button" type="button" aria-haspopup="dialog" onClick={openAccount}>{t(account.state === 'error' ? 'reconnect' : needsSetup ? 'configure' : 'scan')}</button>
             </div>
           )}
-          <Downloads jobs={jobs} view={view} loading={!snapshot && !engineFailure} busy={busy} language={preferences.language} t={t} connected={account?.state === 'connected'} resumeRestarts={account?.backend === 'tdl'} onAction={onJobAction} />
+          {view === 'channels'
+            ? account?.state === 'connected' && <ChannelAttachments
+              t={t} language={preferences.language} busy={busy} destination={destination} notification={notification} onPreview={openPreview} onQueue={addBatch} />
+            : <Downloads jobs={jobs} view={view} loading={!snapshot && !engineFailure} busy={busy} language={preferences.language} t={t} connected={account?.state === 'connected'} resumeRestarts={account?.backend === 'tdl'} onAction={onJobAction} />}
         </div>
       </main>
-      <div className="notifications" role="status" aria-live="polite">
-        {notice && <span>{t(notice)}</span>}
-      </div>
+      {view !== 'channels' && <div className="notifications" role="status" aria-live="polite">
+        {notification && <span>{notification}</span>}
+      </div>}
+      {preview && account?.state === 'connected' && !accountOpen && (
+        <VideoPreview key={preview.url} target={preview} t={t} language={preferences.language} onClose={() => setPreview(undefined)} onDownload={addFromPreview} />
+      )}
       {accountOpen && account && (
         <AccountDialog
           account={account}

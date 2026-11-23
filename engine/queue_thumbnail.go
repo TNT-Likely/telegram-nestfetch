@@ -57,6 +57,10 @@ func (q *queue) saveThumbnail(id, url string) bool {
 	return err == nil
 }
 
+func (entry *queueEntry) localThumbnailAllowed() bool {
+	return !entry.HideThumbnail && !entry.HasThumbnail && (entry.Kind == MediaVideo || entry.Kind == MediaImage)
+}
+
 func boundedRead(path string, limit int64) ([]byte, error) {
 	file, err := os.Open(path)
 	if err != nil {
@@ -111,10 +115,10 @@ func (q *queue) extractThumbnail(ctx context.Context, entry queueEntry) bool {
 		return false
 	}
 	defer os.Remove(input)
-	return q.saveVideoFrame(ctx, entry.ID, input)
+	return q.saveLocalPreview(ctx, entry.ID, input)
 }
 
-func (q *queue) saveVideoFrame(ctx context.Context, id, input string) bool {
+func (q *queue) saveLocalPreview(ctx context.Context, id, input string) bool {
 	// Inputs can live on a read-only volume. All generated files stay in
 	// the app's private cache, regardless of the selected download folder.
 	output := filepath.Join(q.dataDir, "thumbnails", id+".frame.jpg")
@@ -140,7 +144,7 @@ func (q *queue) startThumbnailRecovery() {
 	var pending []*queueEntry
 	for i := len(q.state.Jobs) - 1; i >= 0; i-- {
 		entry := q.state.Jobs[i]
-		if entry.State == completed && !entry.HasThumbnail && !entry.HideThumbnail && entry.OutputPath != "" && entry.Size > 0 {
+		if entry.State == completed && entry.localThumbnailAllowed() && entry.OutputPath != "" && entry.Size > 0 {
 			pending = append(pending, entry)
 		}
 	}
@@ -169,7 +173,7 @@ func (q *queue) restoreThumbnails(pending []*queueEntry) {
 			}
 			// Completed entries are immutable except for the cached preview.
 			// Skip a missing, replaced, or non-regular output.
-			if partSize(entry.OutputPath) == entry.Size && q.saveVideoFrame(q.ctx, entry.ID, entry.OutputPath) {
+			if partSize(entry.OutputPath) == entry.Size && q.saveLocalPreview(q.ctx, entry.ID, entry.OutputPath) {
 				q.mu.Lock()
 				_ = q.updateLocked(entry, func(job *queueEntry) { job.HasThumbnail = true })
 				q.mu.Unlock()

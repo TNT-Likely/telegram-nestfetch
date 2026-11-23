@@ -29,20 +29,21 @@ const (
 )
 
 type Job struct {
-	ID           string   `json:"id"`
-	URL          string   `json:"url"`
-	Title        string   `json:"title"`
-	Source       string   `json:"source"`
-	Name         string   `json:"name"`
-	Size         int64    `json:"size"`
-	Duration     float64  `json:"duration"`
-	Downloaded   int64    `json:"downloaded"`
-	Speed        int64    `json:"speed"`
-	State        string   `json:"state"`
-	Folder       string   `json:"folder"`
-	OutputPath   string   `json:"outputPath"`
-	Error        *Failure `json:"error,omitempty"`
-	HasThumbnail bool     `json:"hasThumbnail"`
+	ID           string    `json:"id"`
+	URL          string    `json:"url"`
+	Title        string    `json:"title"`
+	Source       string    `json:"source"`
+	Name         string    `json:"name"`
+	Kind         MediaKind `json:"kind,omitempty"`
+	Size         int64     `json:"size"`
+	Duration     float64   `json:"duration"`
+	Downloaded   int64     `json:"downloaded"`
+	Speed        int64     `json:"speed"`
+	State        string    `json:"state"`
+	Folder       string    `json:"folder"`
+	OutputPath   string    `json:"outputPath"`
+	Error        *Failure  `json:"error,omitempty"`
+	HasThumbnail bool      `json:"hasThumbnail"`
 }
 
 type queueEntry struct {
@@ -71,16 +72,17 @@ type settings struct {
 }
 
 type queue struct {
-	mu          sync.Mutex
-	state       queueState
-	statePath   string
-	dataDir     string
-	frameHelper string
-	telegram    Telegram
-	activeID    string
-	cancelJob   context.CancelFunc
-	lastBytesAt time.Time
-	accountBusy bool
+	mu           sync.Mutex
+	state        queueState
+	statePath    string
+	dataDir      string
+	frameHelper  string
+	telegram     Telegram
+	activeID     string
+	cancelJob    context.CancelFunc
+	lastBytesAt  time.Time
+	accountBusy  bool
+	telegramTask *telegramTask
 
 	ctx     context.Context
 	cancel  context.CancelFunc
@@ -169,6 +171,10 @@ func (q *queue) load() error {
 			return errors.New("invalid persisted output path")
 		}
 		entry.Speed = 0
+		if entry.Kind == "" && entry.Size > 0 {
+			// Earlier queue records stored videos only.
+			entry.Kind = MediaVideo
+		}
 		if entry.HideThumbnail || (entry.HasThumbnail && !fileExists(q.thumbnailPath(entry.ID))) {
 			entry.HasThumbnail = false
 		}
@@ -349,30 +355,83 @@ func (q *queue) enqueue(rawURL string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	id, err := randomID()
+	added, _, err := q.enqueueLinks([]MessageLink{link})
 	if err != nil {
-		return "", localFailure(err)
+		return "", err
 	}
+	if len(added) == 0 {
+		return "", &Failure{Code: "duplicate"}
+	}
+	return added[0], nil
+}
 
+const maxDownloadBatch = 60
+
+type batchResult struct {
+	Added      int `json:"added"`
+	Duplicates int `json:"duplicates"`
+}
+
+func (q *queue) enqueueBatch(urls []string) (batchResult, error) {
+	if len(urls) == 0 || len(urls) > maxDownloadBatch {
+		return batchResult{}, &Failure{Code: "batch_limit"}
+	}
+	links := make([]MessageLink, 0, len(urls))
+	for _, raw := range urls {
+		link, err := parseMessageLink(raw)
+		if err != nil {
+			return batchResult{}, err
+		}
+		links = append(links, link)
+	}
+	added, duplicates, err := q.enqueueLinks(links)
+	return batchResult{Added: len(added), Duplicates: duplicates}, err
+}
+
+func (q *queue) enqueueLinks(links []MessageLink) ([]string, int, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	seen := make(map[string]bool, len(links))
+	for _, link := range links {
+		seen[link.URL] = false
+	}
 	for _, job := range q.state.Jobs {
-		if job.URL != link.URL {
+		if _, requested := seen[job.URL]; !requested {
 			continue
 		}
 		if job.State != completed || (job.Folder == q.state.Folder && fileExists(job.OutputPath)) {
-			return "", &Failure{Code: "duplicate"}
+			seen[job.URL] = true
 		}
 	}
 
-	entry := &queueEntry{Job: Job{ID: id, URL: link.URL, State: queued, Folder: q.state.Folder}, TopicID: link.TopicID}
-	q.state.Jobs = append(q.state.Jobs, entry)
+	jobs := make([]*queueEntry, 0, len(links))
+	ids := make([]string, 0, len(links))
+	for _, link := range links {
+		if seen[link.URL] {
+			continue
+		}
+		id, err := randomID()
+		if err != nil {
+			return nil, 0, localFailure(err)
+		}
+		seen[link.URL] = true
+		ids = append(ids, id)
+		jobs = append(jobs, &queueEntry{
+			Job: Job{ID: id, URL: link.URL, State: queued, Folder: q.state.Folder}, TopicID: link.TopicID,
+		})
+	}
+	duplicates := len(links) - len(jobs)
+	if len(jobs) == 0 {
+		return ids, duplicates, nil
+	}
+	previous := q.state.Jobs
+	q.state.Jobs = append(previous, jobs...)
 	if err := q.persistLocked(); err != nil {
-		q.state.Jobs = q.state.Jobs[:len(q.state.Jobs)-1]
-		return "", localFailure(err)
+		q.state.Jobs = previous
+		return nil, 0, localFailure(err)
 	}
 	q.notify()
-	return id, nil
+	return ids, duplicates, nil
 }
 
 func (q *queue) pause(id string) error {
@@ -526,6 +585,13 @@ func (q *queue) workNext() bool {
 		q.mu.Unlock()
 		return false
 	}
+	if task := q.telegramTask; task != nil && !task.begun {
+		task.begun = true
+		q.accountBusy = true
+		q.mu.Unlock()
+		q.runTelegramTask(task)
+		return true
+	}
 	connected := q.telegram.Status().State == "connected"
 	var chosen *queueEntry
 	for _, entry := range q.state.Jobs {
@@ -571,7 +637,7 @@ func (q *queue) process(ctx context.Context, entry queueEntry) {
 			return
 		}
 	}
-	if !entry.HideThumbnail && !entry.HasThumbnail && q.frameHelper != "" {
+	if entry.localThumbnailAllowed() && q.frameHelper != "" {
 		if q.extractThumbnail(ctx, entry) &&
 			!q.jobUpdate(ctx, entry.ID, func(current *queueEntry) { current.HasThumbnail = true }) {
 			return
@@ -610,7 +676,7 @@ func (q *queue) fetch(ctx context.Context, entry queueEntry) (queueEntry, bool) 
 		return entry, false
 	}
 	if media.ID == 0 || media.Bytes <= 0 {
-		q.setWorkerError(ctx, entry.ID, failed, &Failure{Code: "no_video"})
+		q.setWorkerError(ctx, entry.ID, failed, &Failure{Code: "no_media"})
 		return entry, false
 	}
 	if math.IsNaN(media.Duration) || math.IsInf(media.Duration, 0) || media.Duration < 0 {
@@ -627,7 +693,7 @@ func (q *queue) fetch(ctx context.Context, entry queueEntry) (queueEntry, bool) 
 	}
 	// A different Telegram document can never reuse the prefix of an older one.
 	currentSize := partSize(part)
-	replaced := entry.DocumentID != media.ID || entry.Size != media.Bytes
+	replaced := entry.DocumentID != media.ID || entry.Size != media.Bytes || entry.Kind != media.Kind
 	if replaced || currentSize > media.Bytes {
 		if err := os.Remove(part); err != nil && !errors.Is(err, os.ErrNotExist) {
 			q.setWorkerError(ctx, entry.ID, failed, localFailure(err))
@@ -645,6 +711,7 @@ func (q *queue) fetch(ctx context.Context, entry queueEntry) (queueEntry, bool) 
 
 	if !q.jobUpdate(ctx, entry.ID, func(job *queueEntry) {
 		job.Name, job.Size, job.Title = filename(media.Name), media.Bytes, strings.TrimSpace(media.Title)
+		job.Kind = media.Kind
 		job.Source, job.Duration, job.DocumentID = media.Source, media.Duration, media.ID
 		job.HasThumbnail, job.Downloaded, job.State = hasThumbnail, currentSize, downloading
 		job.HideThumbnail = media.HideThumbnail

@@ -137,7 +137,7 @@ func TestTelegramCancelRestoringPreservesSession(t *testing.T) {
 	}
 }
 
-func TestTelegramDocumentTransferUsesExactVideoOnly(t *testing.T) {
+func TestTelegramVideoMetadataAndRestrictions(t *testing.T) {
 	ch := &tg.InputChannel{ChannelID: 123}
 	doc := tg.Document{ID: 9223372036854775000, Size: 42 * 1024 * 1024, MimeType: "video/mp4"}
 	doc.Attributes = []tg.DocumentAttributeClass{
@@ -147,7 +147,7 @@ func TestTelegramDocumentTransferUsesExactVideoOnly(t *testing.T) {
 	cover := &tg.Photo{ID: 1234}
 	attachment := &tg.MessageMediaDocument{Document: &doc, VideoCover: cover}
 	message := tg.Message{ID: 41, Media: attachment}
-	got, err := telegramVideoFromMessage(&message, ch, "频道")
+	got, err := telegramMediaFromMessage(&message, ch, "频道")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,16 +162,16 @@ func TestTelegramDocumentTransferUsesExactVideoOnly(t *testing.T) {
 		{TTLPeriod: 60, Media: attachment},
 		{Media: &tg.MessageMediaDocument{TTLSeconds: 1, Document: &doc}},
 	} {
-		_, err := telegramVideoFromMessage(&msg, ch, "")
+		_, err := telegramMediaFromMessage(&msg, ch, "")
 		if mapTelegramFailure(err).Code != "protected_media" {
 			t.Fatalf("protected video passed: %v", err)
 		}
 	}
 
 	photo := tg.Message{Media: &tg.MessageMediaPhoto{Photo: cover}}
-	_, err = telegramVideoFromMessage(&photo, ch, "")
-	if mapTelegramFailure(err).Code != "no_video" {
-		t.Fatalf("non-video accepted: %v", err)
+	_, err = telegramMediaFromMessage(&photo, ch, "")
+	if mapTelegramFailure(err).Code != "no_media" {
+		t.Fatalf("an empty photo accepted: %v", err)
 	}
 }
 
@@ -193,7 +193,7 @@ func TestTelegramPartialSkipsWrittenPartsAndBoundsTotal(t *testing.T) {
 	if offset != telegramPartSize {
 		t.Fatalf("resume offset was %d", offset)
 	}
-	writer := telegramVideoWriter{file: file, remaining: total - offset}
+	writer := telegramMediaWriter{file: file, remaining: total - offset}
 	if _, err := writer.Write(bytes.Repeat([]byte{9}, 2*tail+1)); mapTelegramFailure(err).Code != "download_incomplete" {
 		t.Fatalf("bytes beyond end accepted: %v", err)
 	}

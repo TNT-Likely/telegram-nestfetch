@@ -46,8 +46,15 @@ export function prepareTdl(tauri, target, goOS, goArch) {
   try {
     execFileSync('tar', ['-xzf', archive, '--strip-components', '1', '-C', source]);
     execFileSync('git', ['apply', '--unidiff-zero', path.join(resources, 'qr-login.patch')], { cwd: source });
+    execFileSync('git', ['apply', ...['photo-sizes.patch', 'channel-attachments.patch', 'private-preview.patch']
+      .map(name => path.join(resources, name))], { cwd: source });
+    const stream = path.join(tauri, '..', 'engine', 'preview', 'stream.go');
+    const streamPackage = path.join(source, 'internal', 'nestfetchpreview');
+    mkdirSync(streamPackage, { recursive: true });
+    copyFileSync(stream, path.join(streamPackage, 'stream.go'));
+    copyFileSync(stream, path.join(resources, 'nestfetch-preview-stream.go'));
     const flags = '-s -w -X github.com/iyear/tdl/pkg/consts.Version=' + version +
-      '-nestfetch.1 -X github.com/iyear/tdl/pkg/consts.Commit=' + commit.slice(0, 7);
+      '-nestfetch.2 -X github.com/iyear/tdl/pkg/consts.Commit=' + commit.slice(0, 7);
     const output = path.join(tauri, 'binaries', 'tdl-' + target + (goOS === 'windows' ? '.exe' : ''));
     execFileSync('go', ['build', '-mod=readonly', '-trimpath', '-buildvcs=false', '-ldflags', flags, '-o', output, '.'], {
       cwd: source, stdio: 'inherit',

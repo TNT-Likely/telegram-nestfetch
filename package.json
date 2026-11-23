@@ -1,8 +1,8 @@
 {
   "name": "telegram-nestfetch",
-  "version": "0.1.3",
+  "version": "0.2.0",
   "private": true,
-  "description": "Desktop video downloader for Telegram message links",
+  "description": "Desktop file downloader for Telegram links and channels",
   "license": "MIT",
   "scripts": {
     "dev": "tauri dev",

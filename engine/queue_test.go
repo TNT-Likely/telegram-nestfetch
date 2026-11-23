@@ -30,7 +30,7 @@ type testTelegram struct {
 func fakeTelegram(state string) *testTelegram {
 	return &testTelegram{
 		state: state,
-		media: Media{ID: 113, Name: "clip.mp4", Title: "Clip", Source: "@sample", Bytes: int64(len(videoA)), Duration: 6.5, Thumbnail: jpeg},
+		media: Media{ID: 113, Kind: MediaVideo, Name: "clip.mp4", Title: "Clip", Source: "@sample", Bytes: int64(len(videoA)), Duration: 6.5, Thumbnail: jpeg},
 	}
 }
 

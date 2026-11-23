@@ -1,0 +1,241 @@
+diff --git a/app/chat/export.go b/app/chat/export.go
+index 5916959..49d4345 100644
+--- a/app/chat/export.go
++++ b/app/chat/export.go
+@@ -28,16 +28,19 @@ import (
+ //go:generate go-enum --names --values --flag --nocase
+ 
+ type ExportOptions struct {
+-	Type        ExportType
+-	Chat        string
+-	Thread      int // topic id in forum, message id in group
+-	Input       []int
+-	Output      string
+-	Filter      string
+-	OnlyMedia   bool
+-	WithContent bool
+-	Raw         bool
+-	All         bool
++	Type                ExportType
++	Chat                string
++	Thread              int // topic id in forum, message id in group
++	Input               []int
++	Output              string
++	Filter              string
++	OnlyMedia           bool
++	WithContent         bool
++	Raw                 bool
++	All                 bool
++	PageSize            int
++	BeforeID            int
++	RespectRestrictions bool
+ }
+ 
+ type Message struct {
+@@ -83,6 +86,15 @@ func Export(ctx context.Context, c *telegram.Client, kvd storage.Storage, opts E
+ 	if err != nil {
+ 		return fmt.Errorf("failed to get peer: %w", err)
+ 	}
++	channel, isChannel := peer.(peers.Channel)
++	if opts.RespectRestrictions {
++		if !isChannel {
++			return fmt.Errorf("PEER_ID_INVALID")
++		}
++		if channel.Raw().Noforwards {
++			return fmt.Errorf("CHAT_FORWARDS_RESTRICTED")
++		}
++	}
+ 
+ 	color.Yellow("WARN: Export only generates minimal JSON for tdl download, not for backup.")
+ 	color.Cyan("Occasional suspensions are due to Telegram rate limitations, please wait a moment.")
+@@ -111,7 +123,11 @@ func Export(ctx context.Context, c *telegram.Client, kvd storage.Storage, opts E
+ 
+ 	switch opts.Type {
+ 	case ExportTypeTime:
+-		iter = iter.OffsetDate(opts.Input[1] + 1)
++		if opts.BeforeID > 0 {
++			iter = iter.OffsetID(opts.BeforeID)
++		} else {
++			iter = iter.OffsetDate(opts.Input[1] + 1)
++		}
+ 	case ExportTypeId:
+ 		iter = iter.OffsetID(opts.Input[1] + 1) // #89: retain the last msg id
+ 	case ExportTypeLast:
+@@ -144,12 +160,25 @@ func Export(ctx context.Context, c *telegram.Client, kvd storage.Storage, opts E
+ 	enc.ObjStart()
+ 	defer enc.ObjEnd()
+ 	enc.Field("id", func(e *jx.Encoder) { e.Int64(id) })
++	if opts.PageSize > 0 {
++		enc.Field("title", func(e *jx.Encoder) { e.Str(peer.VisibleName()) })
++		if name, ok := peer.Username(); ok {
++			enc.Field("username", func(e *jx.Encoder) { e.Str(name) })
++		}
++	}
+ 
+ 	enc.FieldStart("messages")
+ 	enc.ArrStart()
+-	defer enc.ArrEnd()
++	var nextBefore int
++	defer func() {
++		enc.ArrEnd()
++		if nextBefore > 0 {
++			enc.Field("nextBefore", func(e *jx.Encoder) { e.Int(nextBefore) })
++		}
++	}()
+ 
+ 	count := int64(0)
++	scanned, lastID := 0, 0
+ 
+ loop:
+ 	for iter.Next(ctx) {
+@@ -159,6 +188,20 @@ loop:
+ 			if msg.Msg.GetDate() < opts.Input[0] {
+ 				break loop
+ 			}
++			if opts.PageSize > 0 {
++				if opts.BeforeID != 0 && msg.Msg.GetID() >= opts.BeforeID {
++					continue
++				}
++				if count >= int64(opts.PageSize) || scanned >= 500 {
++					nextBefore = lastID
++					break loop
++				}
++				lastID = msg.Msg.GetID()
++				scanned++
++				if msg.Msg.GetDate() > opts.Input[1] {
++					continue
++				}
++			}
+ 		case ExportTypeId:
+ 			if msg.Msg.GetID() < opts.Input[0] {
+ 				break loop
+diff --git a/app/chat/ls.go b/app/chat/ls.go
+index 4e177bd..c018014 100644
+--- a/app/chat/ls.go
++++ b/app/chat/ls.go
+@@ -4,6 +4,7 @@ import (
+ 	"context"
+ 	"encoding/json"
+ 	"fmt"
++	"os"
+ 	"strconv"
+ 	"strings"
+ 
+@@ -52,8 +53,10 @@ const (
+ )
+ 
+ type ListOptions struct {
+-	Output ListOutput
+-	Filter string
++	Output       ListOutput
++	Filter       string
++	ChannelsOnly bool
++	OutputFile   string
+ }
+ 
+ func List(ctx context.Context, c *telegram.Client, kvd storage.Storage, opts ListOptions) error {
+@@ -83,7 +86,13 @@ func List(ctx context.Context, c *telegram.Client, kvd storage.Storage, opts Lis
+ 	// Manually iterate through dialogs to handle errors gracefully
+ 	// This allows us to skip problematic dialogs (deleted/inaccessible channels)
+ 	// rather than failing completely when ExtractPeer fails
+-	dialogs, skipped := fetchDialogsWithErrorHandling(ctx, c.API())
++	dialogs, skipped := fetchDialogsWithErrorHandling(ctx, c.API(), nil)
++	if opts.ChannelsOnly {
++		archive := 1
++		archived, lost := fetchDialogsWithErrorHandling(ctx, c.API(), &archive)
++		dialogs = append(dialogs, archived...)
++		skipped += lost
++	}
+ 	if skipped > 0 {
+ 		log.Warn("skipped problematic dialogs during iteration",
+ 			zap.Int("skipped", skipped),
+@@ -99,6 +108,16 @@ func List(ctx context.Context, c *telegram.Client, kvd storage.Storage, opts Lis
+ 	result := make([]*Dialog, 0, len(dialogs))
+ 	for _, d := range dialogs {
+ 		id := tutil.GetInputPeerID(d.Peer)
++		if opts.ChannelsOnly {
++			input, ok := d.Peer.(*tg.InputPeerChannel)
++			if !ok {
++				continue
++			}
++			c, ok := d.Entities.Channel(input.ChannelID)
++			if !ok || !c.Broadcast || c.Left {
++				continue
++			}
++		}
+ 
+ 		// we can update our access hash state if there is any new peer.
+ 		if err = applyPeers(ctx, manager, d.Entities, id); err != nil {
+@@ -145,6 +164,9 @@ func List(ctx context.Context, c *telegram.Client, kvd storage.Storage, opts Lis
+ 		if err != nil {
+ 			return fmt.Errorf("marshal json: %w", err)
+ 		}
++		if opts.OutputFile != "" {
++			return os.WriteFile(opts.OutputFile, bytes, 0600)
++		}
+ 
+ 		fmt.Println(string(bytes))
+ 	default:
+@@ -384,7 +406,7 @@ func applyPeers(ctx context.Context, manager *peers.Manager, entities peer.Entit
+ // to gracefully handle errors from problematic dialogs (deleted/inaccessible channels).
+ // Instead of failing completely when ExtractPeer fails in gotd's iterator, it logs errors
+ // and continues, skipping bad dialogs.
+-func fetchDialogsWithErrorHandling(ctx context.Context, api *tg.Client) ([]dialogs.Elem, int) {
++func fetchDialogsWithErrorHandling(ctx context.Context, api *tg.Client, folder *int) ([]dialogs.Elem, int) {
+ 	log := logctx.From(ctx)
+ 	const batchSize = 100
+ 	var (
+@@ -398,12 +420,16 @@ func fetchDialogsWithErrorHandling(ctx context.Context, api *tg.Client) ([]dialo
+ 
+ 	for {
+ 		// Fetch a batch of dialogs using raw API
+-		result, err := api.MessagesGetDialogs(ctx, &tg.MessagesGetDialogsRequest{
++		request := &tg.MessagesGetDialogsRequest{
+ 			OffsetDate: offsetDate,
+ 			OffsetID:   offsetID,
+ 			OffsetPeer: offsetPeer,
+ 			Limit:      batchSize,
+-		})
++		}
++		if folder != nil {
++			request.SetFolderID(*folder)
++		}
++		result, err := api.MessagesGetDialogs(ctx, request)
+ 		if err != nil {
+ 			log.Error("failed to fetch dialog batch", zap.Error(err))
+ 			break
+diff --git a/cmd/chat.go b/cmd/chat.go
+index 8c8abb3..ce71dac 100644
+--- a/cmd/chat.go
++++ b/cmd/chat.go
+@@ -46,6 +46,8 @@ func NewChatList() *cobra.Command {
+ 
+ 	cmd.Flags().VarP(&opts.Output, "output", "o", fmt.Sprintf("output format: [%s]", strings.Join(chat.ListOutputNames(), ", ")))
+ 	cmd.Flags().StringVarP(&opts.Filter, "filter", "f", "true", "filter chats by expression")
++	cmd.Flags().BoolVar(&opts.ChannelsOnly, "channels-only", false, "return subscribed broadcast channels, including archived channels")
++	cmd.Flags().StringVar(&opts.OutputFile, "output-file", "", "save JSON to a file instead of standard output")
+ 
+ 	return cmd
+ }
+@@ -83,6 +85,11 @@ func NewChatExport() *cobra.Command {
+ 				return fmt.Errorf("unknown export type: %s", opts.Type)
+ 			}
+ 
++			if opts.PageSize < 0 || opts.PageSize > 100 || opts.BeforeID < 0 ||
++				(opts.BeforeID > 0 && opts.PageSize == 0) ||
++				(opts.PageSize > 0 && opts.Type != chat.ExportTypeTime) {
++				return fmt.Errorf("invalid export page")
++			}
+ 			return tRun(cmd.Context(), func(ctx context.Context, c *telegram.Client, kvd storage.Storage) error {
+ 				return chat.Export(logctx.Named(ctx, "export"), c, kvd, opts)
+ 			}, limiter)
+@@ -108,6 +115,9 @@ func NewChatExport() *cobra.Command {
+ 	cmd.Flags().BoolVar(&opts.WithContent, "with-content", false, "export with message content")
+ 	cmd.Flags().BoolVar(&opts.Raw, "raw", false, "export raw message struct of Telegram MTProto API, useful for debugging")
+ 	cmd.Flags().BoolVar(&opts.All, "all", false, "export all messages including non-media messages, but still affected by filter and type flag")
++	cmd.Flags().IntVar(&opts.PageSize, "page-size", 0, "maximum messages in a time export page, zero uses the full range")
++	cmd.Flags().IntVar(&opts.BeforeID, "before-id", 0, "continue a time export before this message ID")
++	cmd.Flags().BoolVar(&opts.RespectRestrictions, "respect-restrictions", false, "reject channels with content protection")
+ 
+ 	// completion and validation
+ 	_ = cmd.RegisterFlagCompletionFunc(input, func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {

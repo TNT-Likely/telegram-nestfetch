@@ -7,7 +7,6 @@ import (
 	"encoding/base64"
 	"errors"
 	"io"
-	"math"
 	"net/http"
 	"os"
 	"path"
@@ -31,11 +30,13 @@ const (
 	telegramTransferIdle = 60 * time.Second
 )
 
-type telegramVideo struct {
-	doc     *tg.Document
-	cover   *tg.Photo
-	media   Media
-	channel *tg.InputChannel
+type telegramMedia struct {
+	doc      *tg.Document
+	cover    *tg.Photo
+	media    Media
+	channel  *tg.InputChannel
+	location tg.InputFileLocationClass
+	dc       int
 }
 
 func (p *telegramProvider) Inspect(parent context.Context, link MessageLink) (Media, error) {
@@ -46,18 +47,18 @@ func (p *telegramProvider) Inspect(parent context.Context, link MessageLink) (Me
 	defer cleanup()
 
 	lookup, cancel := context.WithTimeout(ctx, connectDeadline)
-	video, err := findTelegramVideo(lookup, client.API(), link)
+	attachment, err := findTelegramMedia(lookup, client.API(), link)
 	cancel()
 	if err != nil {
 		return Media{}, telegramOperationError(ctx, err)
 	}
 
-	if !video.media.HideThumbnail {
+	if !attachment.media.HideThumbnail {
 		preview, stop := context.WithTimeout(ctx, 6*time.Second)
-		video.media.Thumbnail = telegramThumbnail(preview, client, video)
+		attachment.media.Thumbnail = telegramThumbnail(preview, client, attachment)
 		stop()
 	}
-	return video.media, ctx.Err()
+	return attachment.media, ctx.Err()
 }
 
 func (p *telegramProvider) Download(parent context.Context, link MessageLink, media Media, target string, progress func(int64)) error {
@@ -68,12 +69,12 @@ func (p *telegramProvider) Download(parent context.Context, link MessageLink, me
 	defer cleanup()
 
 	lookup, cancel := context.WithTimeout(ctx, connectDeadline)
-	video, err := findTelegramVideo(lookup, client.API(), link)
+	attachment, err := findTelegramMedia(lookup, client.API(), link)
 	cancel()
 	if err != nil {
 		return telegramOperationError(ctx, err)
 	}
-	if video.doc.ID != media.ID || video.doc.Size != media.Bytes {
+	if !sameTelegramAttachment(attachment.media, media) {
 		return telegramFailure("media_changed")
 	}
 
@@ -87,7 +88,7 @@ func (p *telegramProvider) Download(parent context.Context, link MessageLink, me
 	}
 
 	if offset < media.Bytes {
-		if err := streamTelegramVideo(ctx, client, link, video, file, offset, progress); err != nil {
+		if err := streamTelegramMedia(ctx, client, link, attachment, file, offset, progress); err != nil {
 			return err
 		}
 	}
@@ -141,8 +142,8 @@ func openTelegramPartial(target string, total int64) (*os.File, int64, error) {
 	return file, offset, nil
 }
 
-func streamTelegramVideo(
-	ctx context.Context, client *telegram.Client, link MessageLink, video telegramVideo,
+func streamTelegramMedia(
+	ctx context.Context, client *telegram.Client, link MessageLink, attachment telegramMedia,
 	file *os.File, offset int64, progress func(int64),
 ) error {
 	transfer, stop := context.WithCancelCause(ctx)
@@ -150,23 +151,23 @@ func streamTelegramVideo(
 	timer := time.AfterFunc(telegramTransferIdle, func() { stop(context.DeadlineExceeded) })
 	defer timer.Stop()
 
-	invoker, err := client.FileDC(transfer, video.doc.DCID)
+	invoker, err := client.FileDC(transfer, attachment.dc)
 	if err != nil {
 		return telegramOperationError(ctx, err)
 	}
-	dst := &telegramVideoWriter{file: file, remaining: video.doc.Size - offset}
-	_, err = client.DownloadVia(invoker, documentLocation(video.doc, "")).
-		WithSize(video.doc.Size).
+	dst := &telegramMediaWriter{file: file, remaining: attachment.media.Bytes - offset}
+	_, err = client.DownloadVia(invoker, attachment.location).
+		WithSize(attachment.media.Bytes).
 		WithOffset(offset).
 		WithRefresh(func(ctx context.Context) (tg.InputFileLocationClass, error) {
-			updated, err := fetchTelegramVideo(ctx, client.API(), video.channel, link, video.media.Source)
+			updated, err := fetchTelegramMedia(ctx, client.API(), attachment.channel, link, attachment.media.Source)
 			if err != nil {
 				return nil, err
 			}
-			if updated.doc.ID != video.doc.ID || updated.doc.Size != video.doc.Size {
+			if !sameTelegramAttachment(updated.media, attachment.media) {
 				return nil, telegramFailure("media_changed")
 			}
-			return documentLocation(updated.doc, ""), nil
+			return updated.location, nil
 		}).
 		WithProgress(func(done, _ int64) {
 			timer.Reset(telegramTransferIdle)
@@ -187,13 +188,13 @@ func streamTelegramVideo(
 	return nil
 }
 
-// Limit the accepted bytes to the exact document size Telegram advertised.
-type telegramVideoWriter struct {
+// Limit the accepted bytes to the exact attachment size Telegram advertised.
+type telegramMediaWriter struct {
 	file      io.Writer
 	remaining int64
 }
 
-func (w *telegramVideoWriter) Write(data []byte) (int, error) {
+func (w *telegramMediaWriter) Write(data []byte) (int, error) {
 	if int64(len(data)) > w.remaining {
 		return 0, telegramFailure("download_incomplete")
 	}
@@ -212,12 +213,12 @@ func telegramOperationError(ctx context.Context, err error) error {
 	return mapTelegramFailure(err)
 }
 
-func findTelegramVideo(ctx context.Context, api *tg.Client, link MessageLink) (telegramVideo, error) {
+func findTelegramMedia(ctx context.Context, api *tg.Client, link MessageLink) (telegramMedia, error) {
 	channel, source, err := resolveTelegramChannel(ctx, api, link)
 	if err != nil {
-		return telegramVideo{}, err
+		return telegramMedia{}, err
 	}
-	return fetchTelegramVideo(ctx, api, channel, link, source)
+	return fetchTelegramMedia(ctx, api, channel, link, source)
 }
 
 func resolveTelegramChannel(ctx context.Context, api *tg.Client, link MessageLink) (*tg.InputChannel, string, error) {
@@ -269,19 +270,19 @@ func resolveTelegramChannel(ctx context.Context, api *tg.Client, link MessageLin
 	return nil, "", telegramFailure("access_denied")
 }
 
-func fetchTelegramVideo(
+func fetchTelegramMedia(
 	ctx context.Context, api *tg.Client, channel *tg.InputChannel, link MessageLink, source string,
-) (telegramVideo, error) {
+) (telegramMedia, error) {
 	result, err := api.ChannelsGetMessages(ctx, &tg.ChannelsGetMessagesRequest{
 		Channel: channel,
 		ID:      []tg.InputMessageClass{&tg.InputMessageID{ID: link.MessageID}},
 	})
 	if err != nil {
-		return telegramVideo{}, err
+		return telegramMedia{}, err
 	}
 	messages, ok := result.AsModified()
 	if !ok {
-		return telegramVideo{}, telegramFailure("message_not_found")
+		return telegramMedia{}, telegramFailure("message_not_found")
 	}
 	for _, chat := range messages.GetChats() {
 		c, ok := chat.(*tg.Channel)
@@ -289,7 +290,7 @@ func fetchTelegramVideo(
 			continue
 		}
 		if c.Noforwards {
-			return telegramVideo{}, telegramFailure("protected_media")
+			return telegramMedia{}, telegramFailure("protected_media")
 		}
 		if source == "" {
 			source = telegramDisplayText(c.Title)
@@ -301,58 +302,89 @@ func fetchTelegramVideo(
 			continue
 		}
 		if peer, ok := msg.PeerID.(*tg.PeerChannel); ok && peer.ChannelID == channel.ChannelID {
-			return telegramVideoFromMessage(msg, channel, source)
+			return telegramMediaFromMessage(msg, channel, source)
 		}
 	}
-	return telegramVideo{}, telegramFailure("message_not_found")
+	return telegramMedia{}, telegramFailure("message_not_found")
 }
 
-func telegramVideoFromMessage(message *tg.Message, channel *tg.InputChannel, source string) (telegramVideo, error) {
-	if message.Noforwards || message.TTLPeriod != 0 {
-		return telegramVideo{}, telegramFailure("protected_media")
-	}
-	attachment, ok := message.Media.(*tg.MessageMediaDocument)
-	if !ok {
-		return telegramVideo{}, telegramFailure("no_video")
-	}
-	if _, timed := attachment.GetTTLSeconds(); timed || attachment.TTLSeconds != 0 {
-		return telegramVideo{}, telegramFailure("protected_media")
-	}
-	doc, ok := attachment.Document.(*tg.Document)
-	if !ok || doc.ID == 0 || doc.Size <= 0 {
-		return telegramVideo{}, telegramFailure("no_video")
+func telegramMediaFromMessage(message *tg.Message, channel *tg.InputChannel, source string) (telegramMedia, error) {
+	if message.Noforwards || message.Flags.Has(26) || message.TTLPeriod != 0 {
+		return telegramMedia{}, telegramFailure("protected_media")
 	}
 
-	name := ""
-	duration := 0.0
-	video := attachment.Video || attachment.Round || strings.HasPrefix(doc.MimeType, "video/")
+	switch attachment := message.Media.(type) {
+	case *tg.MessageMediaDocument:
+		if _, timed := attachment.GetTTLSeconds(); timed || attachment.TTLSeconds != 0 {
+			return telegramMedia{}, telegramFailure("protected_media")
+		}
+		doc, ok := attachment.Document.(*tg.Document)
+		if !ok || doc.ID == 0 || doc.Size <= 0 {
+			return telegramMedia{}, telegramFailure("no_media")
+		}
+		return telegramDocument(attachment, doc, channel, message.ID, source), nil
+	case *tg.MessageMediaPhoto:
+		if _, timed := attachment.GetTTLSeconds(); timed || attachment.TTLSeconds != 0 {
+			return telegramMedia{}, telegramFailure("protected_media")
+		}
+		photo, ok := attachment.Photo.(*tg.Photo)
+		if !ok || photo.ID == 0 {
+			return telegramMedia{}, telegramFailure("no_media")
+		}
+		kind, size := largestPhotoSize(photo.Sizes)
+		if size <= 0 {
+			return telegramMedia{}, telegramFailure("no_media")
+		}
+		return telegramMedia{
+			media: photoMedia(photo.ID, int64(size), source, attachment.Spoiler),
+			dc:    photo.DCID, location: photoLocation(photo, kind), channel: channel, cover: photo,
+		}, nil
+	default:
+		return telegramMedia{}, telegramFailure("no_media")
+	}
+}
+
+func telegramDocument(attachment *tg.MessageMediaDocument, doc *tg.Document, channel *tg.InputChannel, messageID int, source string) telegramMedia {
+	media := Media{ID: doc.ID, Bytes: doc.Size, MIME: doc.MimeType, Source: source, HideThumbnail: attachment.Spoiler}
+	if attachment.Video || attachment.Round {
+		media.Kind = MediaVideo
+	} else if attachment.Voice {
+		media.Kind = MediaAudio
+	}
 	for _, attribute := range doc.Attributes {
 		switch detail := attribute.(type) {
 		case *tg.DocumentAttributeFilename:
-			name = detail.FileName
+			media.Name = detail.FileName
 		case *tg.DocumentAttributeVideo:
-			video = true
-			if detail.Duration > 0 && !math.IsInf(detail.Duration, 0) {
-				duration = detail.Duration
+			media.Kind, media.Duration = MediaVideo, detail.Duration
+		case *tg.DocumentAttributeAudio:
+			if media.Kind != MediaVideo {
+				media.Kind, media.Duration = MediaAudio, float64(detail.Duration)
 			}
 		}
 	}
-	if !video {
-		return telegramVideo{}, telegramFailure("no_video")
-	}
-
-	name = telegramVideoFilename(name, doc.MimeType, message.ID)
-	title := strings.TrimSuffix(name, path.Ext(name))
 	cover, _ := attachment.VideoCover.(*tg.Photo)
-	return telegramVideo{
-		doc:     doc,
-		cover:   cover,
-		channel: channel,
-		media: Media{
-			ID: doc.ID, Name: name, Title: title, Source: source, Bytes: doc.Size,
-			Duration: duration, HideThumbnail: attachment.Spoiler,
-		},
-	}, nil
+	return telegramMedia{
+		doc: doc, cover: cover, channel: channel, dc: doc.DCID,
+		location: documentLocation(doc, ""), media: describeDocument(media, messageID),
+	}
+}
+
+func largestPhotoSize(sizes []tg.PhotoSizeClass) (string, int) {
+	// Telegram orders its photo variants from the smallest to the largest.
+	for i := len(sizes) - 1; i >= 0; i-- {
+		switch size := sizes[i].(type) {
+		case *tg.PhotoSize:
+			if size.Type != "" && size.Size > 0 {
+				return size.Type, size.Size
+			}
+		case *tg.PhotoSizeProgressive:
+			if n := len(size.Sizes); size.Type != "" && n != 0 && size.Sizes[n-1] > 0 {
+				return size.Type, size.Sizes[n-1]
+			}
+		}
+	}
+	return "", 0
 }
 
 func telegramVideoFilename(name, mime string, id int) string {
@@ -413,6 +445,12 @@ func documentLocation(doc *tg.Document, size string) *tg.InputDocumentFileLocati
 	}
 }
 
+func photoLocation(photo *tg.Photo, size string) *tg.InputPhotoFileLocation {
+	return &tg.InputPhotoFileLocation{
+		ID: photo.ID, AccessHash: photo.AccessHash, FileReference: photo.FileReference, ThumbSize: size,
+	}
+}
+
 type telegramThumb struct {
 	kind   string
 	inline []byte
@@ -458,17 +496,20 @@ func telegramThumbs(sizes []tg.PhotoSizeClass) []telegramThumb {
 	return candidates
 }
 
-func telegramThumbnail(ctx context.Context, client *telegram.Client, video telegramVideo) string {
-	if video.cover != nil {
-		cover := video.cover
+func telegramThumbnail(ctx context.Context, client *telegram.Client, attachment telegramMedia) string {
+	if attachment.cover != nil {
+		cover := attachment.cover
 		if image := fetchTelegramThumbnail(ctx, client, cover.DCID, telegramThumbs(cover.Sizes), func(kind string) tg.InputFileLocationClass {
-			return &tg.InputPhotoFileLocation{ID: cover.ID, AccessHash: cover.AccessHash, FileReference: cover.FileReference, ThumbSize: kind}
+			return photoLocation(cover, kind)
 		}); image != "" {
 			return image
 		}
 	}
-	return fetchTelegramThumbnail(ctx, client, video.doc.DCID, telegramThumbs(video.doc.Thumbs), func(kind string) tg.InputFileLocationClass {
-		return documentLocation(video.doc, kind)
+	if attachment.doc == nil {
+		return ""
+	}
+	return fetchTelegramThumbnail(ctx, client, attachment.doc.DCID, telegramThumbs(attachment.doc.Thumbs), func(kind string) tg.InputFileLocationClass {
+		return documentLocation(attachment.doc, kind)
 	})
 }
 

@@ -10,6 +10,7 @@ use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 
 const TELEGRAM_SETTINGS: &str = "https://my.telegram.org/apps";
+const PROJECT_REPOSITORY: &str = "https://github.com/TNT-Likely/telegram-nestfetch";
 
 #[tauri::command]
 async fn engine_request(
@@ -20,7 +21,9 @@ async fn engine_request(
     match method.as_str() {
         "snapshot" | "configure" | "begin_login" | "login_password" | "cancel_login"
         | "sign_out" | "set_folder" | "enqueue" | "pause" | "resume" | "retry"
-        | "save_elsewhere" | "thumbnail" => engine.request(&method, params).await,
+        | "save_elsewhere" | "thumbnail" | "enqueue_batch" | "channels_start" | "channels_status"
+        | "attachments_start" | "attachments_status" | "browse_cancel" | "preview_start"
+        | "preview_status" | "preview_stop" => engine.request(&method, params).await,
         _ => Err(Failure::new("invalid_request")),
     }
 }
@@ -83,6 +86,13 @@ fn open_telegram_settings(app: AppHandle) -> Result<(), Failure> {
         .map_err(|_| Failure::new("open_failed"))
 }
 
+#[tauri::command]
+fn open_project_repository(app: AppHandle) -> Result<(), Failure> {
+    app.opener()
+        .open_url(PROJECT_REPOSITORY, None::<&str>)
+        .map_err(|_| Failure::new("open_failed"))
+}
+
 fn main() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _, _| {
@@ -119,7 +129,8 @@ fn main() {
             engine_request,
             choose_folder,
             reveal_job,
-            open_telegram_settings
+            open_telegram_settings,
+            open_project_repository
         ])
         .build(tauri::generate_context!())
         .expect("failed to start TG NestFetch");

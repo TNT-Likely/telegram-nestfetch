@@ -2,6 +2,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -17,13 +18,13 @@ import (
 )
 
 const (
-	tdlTransferName = "nestfetch-video"
+	tdlTransferName = "nestfetch-file"
 	tdlMetadataMax  = 4 * 1024 * 1024
 	tdlTransferIdle = 90 * time.Second
 )
 
 // The pinned tdl release serializes its Go MTProto structs in the raw
-// attachment. Decode only fields needed for one video and its inline preview.
+// attachment. Decode only fields needed for the file and its inline preview.
 type tdlArchive struct {
 	ID       int64
 	Messages []tdlArchiveMessage
@@ -38,6 +39,7 @@ type tdlArchiveMessage struct {
 
 type tdlRawMessage struct {
 	ID         int
+	Date       int
 	Flags      uint32
 	Noforwards bool
 	TTLPeriod  int
@@ -48,11 +50,13 @@ type tdlRawMessage struct {
 type tdlRawMedia struct {
 	Flags      uint32
 	Spoiler    bool
-	Video      bool
+	Video      json.RawMessage // a boolean for documents, an object for Live Photos
 	Round      bool
+	Voice      bool
 	TTLSeconds int
 	Document   *tdlRawDocument
-	VideoCover *struct{ Sizes []tdlInlinePhoto }
+	Photo      *tdlRawPhoto
+	VideoCover *tdlRawPhoto
 }
 
 type tdlRawDocument struct {
@@ -73,6 +77,13 @@ type tdlInlinePhoto struct {
 	W     int
 	H     int
 	Bytes []byte
+	Size  int64
+	Sizes []int64
+}
+
+type tdlRawPhoto struct {
+	ID    int64
+	Sizes []tdlInlinePhoto
 }
 
 type tdlMediaRecord struct {
@@ -88,61 +99,74 @@ func decodeTDLArchive(data []byte, link MessageLink) (tdlMediaRecord, error) {
 		return tdlMediaRecord{}, &Failure{Code: "telegram_error"}
 	}
 
-	if len(archive.Messages) == 0 {
-		return tdlMediaRecord{}, &Failure{Code: "message_not_found"}
-	}
-	if len(archive.Messages) != 1 || archive.ID <= 0 ||
+	if len(archive.Messages) != 1 || archive.Messages[0].ID != link.MessageID ||
 		(link.ChannelID != 0 && archive.ID != link.ChannelID) {
 		return tdlMediaRecord{}, &Failure{Code: "message_not_found"}
 	}
-	item := archive.Messages[0]
-	if item.ID != link.MessageID || item.Raw == nil || item.Raw.ID != link.MessageID ||
-		item.Type != "message" || item.Raw.PeerID.ChannelID != archive.ID {
+	source := ""
+	if link.Username != "" {
+		source = "@" + link.Username
+	}
+	return decodeTDLMessage(archive.Messages[0], archive.ID, source)
+}
+
+func decodeTDLMessage(item tdlArchiveMessage, channelID int64, source string) (tdlMediaRecord, error) {
+	raw := item.Raw
+	if channelID <= 0 || item.ID <= 0 || raw == nil || raw.ID != item.ID ||
+		item.Type != "message" || raw.PeerID.ChannelID != channelID {
 		return tdlMediaRecord{}, &Failure{Code: "message_not_found"}
 	}
-	raw := item.Raw
 	if raw.Noforwards || raw.Flags&(1<<26) != 0 || raw.TTLPeriod != 0 {
 		return tdlMediaRecord{}, &Failure{Code: "protected_media"}
 	}
 	media := raw.Media
 	if media == nil {
-		return tdlMediaRecord{}, &Failure{Code: "no_video"}
+		return tdlMediaRecord{}, &Failure{Code: "no_media"}
 	}
-	doc := media.Document
-	if doc == nil || doc.ID == 0 || doc.Size <= 0 || item.File == "" || len(item.File) > 4096 {
-		return tdlMediaRecord{}, &Failure{Code: "no_video"}
-	}
-	// messageMediaDocument.ttl_seconds is in bit 2, including an
-	// explicitly present zero-valued field in the generated raw struct.
+	// Both Telegram documents and photos store ttl_seconds in bit 2.
 	if media.TTLSeconds != 0 || media.Flags&(1<<2) != 0 {
 		return tdlMediaRecord{}, &Failure{Code: "protected_media"}
 	}
+	if item.File == "" || len(item.File) > 4096 {
+		return tdlMediaRecord{}, &Failure{Code: "no_media"}
+	}
 
-	isVideo := media.Video || media.Round || strings.HasPrefix(strings.ToLower(doc.MimeType), "video/")
-	name := item.File
-	duration := 0.0
+	var result Media
+	switch {
+	case media.Document != nil && media.Document.ID != 0 && media.Document.Size > 0:
+		result = tdlDocument(media, item.ID, item.File, source)
+	case media.Photo != nil && media.Photo.ID != 0:
+		size := tdlPhotoSize(media.Photo.Sizes)
+		if size <= 0 {
+			return tdlMediaRecord{}, &Failure{Code: "no_media"}
+		}
+		result = photoMedia(media.Photo.ID, size, source, media.Spoiler)
+		if !media.Spoiler {
+			result.Thumbnail = inlineTDLThumbnail(media.Photo.Sizes)
+		}
+	default:
+		return tdlMediaRecord{}, &Failure{Code: "no_media"}
+	}
+	return tdlMediaRecord{channelID: channelID, messageID: item.ID, file: item.File, media: result}, nil
+}
+
+func tdlDocument(media *tdlRawMedia, messageID int, exportName, source string) Media {
+	doc := media.Document
+	result := Media{ID: doc.ID, Bytes: doc.Size, MIME: doc.MimeType, Name: exportName, Source: source, HideThumbnail: media.Spoiler}
+	if media.Round || bytes.Equal(media.Video, []byte("true")) {
+		result.Kind = MediaVideo
+	} else if media.Voice {
+		result.Kind = MediaAudio
+	}
 	for _, attr := range doc.Attributes {
 		if attr.FileName != "" {
-			name = attr.FileName
+			result.Name = attr.FileName
 		}
 		if attr.Duration != nil && attr.W != nil && attr.H != nil {
-			isVideo = true
-			if *attr.Duration > 0 {
-				duration = *attr.Duration
-			}
+			result.Kind, result.Duration = MediaVideo, *attr.Duration
+		} else if attr.Duration != nil && result.Kind != MediaVideo {
+			result.Kind, result.Duration = MediaAudio, *attr.Duration
 		}
-	}
-	if !isVideo {
-		return tdlMediaRecord{}, &Failure{Code: "no_video"}
-	}
-	name = telegramVideoFilename(name, doc.MimeType, link.MessageID)
-	source := "@" + link.Username
-	if link.Username == "" {
-		source = ""
-	}
-	result := Media{
-		ID: doc.ID, Name: name, Title: strings.TrimSuffix(name, filepath.Ext(name)),
-		Source: source, Bytes: doc.Size, Duration: duration, HideThumbnail: media.Spoiler,
 	}
 	if !result.HideThumbnail {
 		if media.VideoCover != nil {
@@ -152,7 +176,23 @@ func decodeTDLArchive(data []byte, link MessageLink) (tdlMediaRecord, error) {
 			result.Thumbnail = inlineTDLThumbnail(doc.Thumbs)
 		}
 	}
-	return tdlMediaRecord{channelID: archive.ID, messageID: item.ID, file: item.File, media: result}, nil
+	return describeDocument(result, messageID)
+}
+
+func tdlPhotoSize(sizes []tdlInlinePhoto) int64 {
+	for i := len(sizes) - 1; i >= 0; i-- {
+		size := sizes[i]
+		if size.Type == "" {
+			continue
+		}
+		if size.Size > 0 {
+			return size.Size
+		}
+		if n := len(size.Sizes); n > 0 && size.Sizes[n-1] > 0 {
+			return size.Sizes[n-1]
+		}
+	}
+	return 0
 }
 
 func inlineTDLThumbnail(photos []tdlInlinePhoto) string {
@@ -222,7 +262,7 @@ func (p *tdlProvider) readTDLMedia(ctx context.Context, link MessageLink, refres
 	args := []string{
 		"chat", "export", "--chat", chat,
 		"--type", "id", "--input", id + "," + id,
-		"--all", "--raw", "--output", output,
+		"--all", "--raw", "--respect-restrictions", "--output", output,
 	}
 	if err := p.runTDLExport(ctx, args); err != nil {
 		if !refreshPeer || link.ChannelID == 0 || transferFailure(err).Code != "access_denied" {
@@ -298,7 +338,7 @@ func (p *tdlProvider) Download(
 	if err != nil {
 		return err
 	}
-	if !tdlSameMedia(expected, verified.media) {
+	if !sameTelegramAttachment(expected, verified.media) {
 		return &Failure{Code: "media_changed"}
 	}
 	directory, err := os.MkdirTemp(filepath.Dir(target), ".tdl-")
@@ -329,23 +369,19 @@ func (p *tdlProvider) Download(
 	if err != nil {
 		return err
 	}
-	if after.channelID != verified.channelID || !tdlSameMedia(expected, after.media) {
+	if after.channelID != verified.channelID || !sameTelegramAttachment(expected, after.media) {
 		return &Failure{Code: "media_changed"}
 	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := adoptTDLVideo(ready, target); err != nil {
+	if err := adoptTDLAttachment(ready, target); err != nil {
 		return &Failure{Code: "disk_write_failed"}
 	}
 	if progress != nil {
 		progress(expected.Bytes)
 	}
 	return nil
-}
-
-func tdlSameMedia(a, b Media) bool {
-	return a.ID == b.ID && a.Bytes == b.Bytes && a.HideThumbnail == b.HideThumbnail
 }
 
 func (p *tdlProvider) runTDLTransfer(
@@ -411,7 +447,7 @@ func (p *tdlProvider) runTDLTransfer(
 	}
 }
 
-func adoptTDLVideo(source, target string) error {
+func adoptTDLAttachment(source, target string) error {
 	if stat, err := os.Lstat(target); err == nil {
 		if !stat.Mode().IsRegular() {
 			return errors.New("invalid staging file")

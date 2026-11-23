@@ -1,6 +1,6 @@
 {
   "bundle": {
-    "targets": ["app", "dmg"],
+    "targets": ["dmg"],
     "resources": {"resources/tg-nestfetch-frame": "tg-nestfetch-frame"},
     "macOS": {
       "minimumSystemVersion": "13.0",

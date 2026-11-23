@@ -24,7 +24,7 @@ type response struct {
 
 func serve(ctx context.Context, input io.Reader, output io.Writer, q *queue) error {
 	scanner := bufio.NewScanner(input)
-	scanner.Buffer(make([]byte, 4096), 32*1024)
+	scanner.Buffer(make([]byte, 4096), 160*1024)
 	encoder := json.NewEncoder(output)
 	for scanner.Scan() {
 		if ctx.Err() != nil {
@@ -65,11 +65,13 @@ func handleRequest(ctx context.Context, q *queue, line []byte) response {
 
 func dispatch(ctx context.Context, q *queue, message request) (any, error) {
 	var args struct {
-		ID       string `json:"id"`
-		URL      string `json:"url"`
-		Folder   string `json:"folder"`
-		Password string `json:"password"`
+		ID       string   `json:"id"`
+		URL      string   `json:"url"`
+		URLs     []string `json:"urls"`
+		Folder   string   `json:"folder"`
+		Password string   `json:"password"`
 		APIConfig
+		channelQuery
 	}
 	if len(message.Params) != 0 {
 		if err := json.Unmarshal(message.Params, &args); err != nil {
@@ -96,6 +98,29 @@ func dispatch(ctx context.Context, q *queue, message request) (any, error) {
 		return nil, q.setFolder(args.Folder)
 	case "enqueue":
 		return q.enqueue(args.URL)
+	case "enqueue_batch":
+		return q.enqueueBatch(args.URLs)
+	case "channels_start", "attachments_start", "preview_start":
+		var id string
+		var err error
+		switch message.Method {
+		case "channels_start":
+			id, err = q.startChannelList()
+		case "attachments_start":
+			id, err = q.startAttachmentList(args.channelQuery)
+		case "preview_start":
+			id, err = q.startPreview(args.URL)
+		}
+		return map[string]string{"id": id}, err
+	case "channels_status":
+		return q.telegramTaskStatus("channels", args.ID)
+	case "attachments_status":
+		return q.telegramTaskStatus("attachments", args.ID)
+	case "preview_status":
+		return q.telegramTaskStatus("preview", args.ID)
+	case "browse_cancel", "preview_stop":
+		q.cancelTelegramTask(args.ID, message.Method == "preview_stop")
+		return nil, nil
 	case "pause":
 		return nil, q.pause(args.ID)
 	case "resume":

@@ -40,15 +40,26 @@ type MessageLink struct {
 	TopicID   int
 }
 
+type MediaKind string
+
+const (
+	MediaVideo MediaKind = "video"
+	MediaImage MediaKind = "image"
+	MediaAudio MediaKind = "audio"
+	MediaFile  MediaKind = "file"
+)
+
 type Media struct {
-	ID            int64   `json:"id"`     // Telegram document ID, used to check for replacement
-	Name          string  `json:"name"`   // untrusted filename
-	Title         string  `json:"title"`  // short display title, usually derived from filename
-	Source        string  `json:"source"` // channel name or @handle
-	Bytes         int64   `json:"bytes"`
-	Duration      float64 `json:"duration"`
-	Thumbnail     string  `json:"thumbnail,omitempty"`     // a bounded data:image/{jpeg,png,webp};base64 URL
-	HideThumbnail bool    `json:"hideThumbnail,omitempty"` // Telegram marks the video as a spoiler
+	ID            int64     `json:"id"` // Telegram document or photo ID
+	Kind          MediaKind `json:"kind"`
+	MIME          string    `json:"-"`
+	Name          string    `json:"name"`   // untrusted filename
+	Title         string    `json:"title"`  // short display title, usually derived from filename
+	Source        string    `json:"source"` // channel name or @handle
+	Bytes         int64     `json:"bytes"`
+	Duration      float64   `json:"duration"`
+	Thumbnail     string    `json:"thumbnail,omitempty"`     // a bounded data:image/{jpeg,png,webp};base64 URL
+	HideThumbnail bool      `json:"hideThumbnail,omitempty"` // Telegram marks the attachment as a spoiler
 }
 
 type Failure struct {

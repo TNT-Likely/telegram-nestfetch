@@ -9,20 +9,39 @@ let input = URL(fileURLWithPath: CommandLine.arguments[1])
 let output = URL(fileURLWithPath: CommandLine.arguments[2])
 let maximumSize = CGSize(width: 960, height: 540)
 
+func writeJPEG(_ image: CGImage) -> Bool {
+    guard let jpeg = CGImageDestinationCreateWithURL(output as CFURL, UTType.jpeg.identifier as CFString, 1, nil)
+    else { return false }
+    CGImageDestinationAddImage(jpeg, image, [kCGImageDestinationLossyCompressionQuality: 0.76] as CFDictionary)
+    return CGImageDestinationFinalize(jpeg)
+}
+
+func writeImagePreview() -> Bool {
+    guard let source = CGImageSourceCreateWithURL(input as CFURL, nil),
+          let identifier = CGImageSourceGetType(source),
+          let type = UTType(identifier as String), type.conforms(to: .image)
+    else { return false }
+    let options = [
+        kCGImageSourceThumbnailMaxPixelSize: maximumSize.width,
+        kCGImageSourceCreateThumbnailFromImageAlways: true,
+        kCGImageSourceCreateThumbnailWithTransform: true,
+    ] as CFDictionary
+    guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options) else { return false }
+    return writeJPEG(image)
+}
+
 func writeNativeFrame() -> Bool {
     let generator = AVAssetImageGenerator(asset: AVURLAsset(url: input))
     generator.appliesPreferredTrackTransform = true
     generator.maximumSize = maximumSize
     let time = CMTime(seconds: 0.35, preferredTimescale: 600)
     guard let image = (try? generator.copyCGImage(at: time, actualTime: nil))
-        ?? (try? generator.copyCGImage(at: .zero, actualTime: nil)),
-        let jpeg = CGImageDestinationCreateWithURL(output as CFURL, UTType.jpeg.identifier as CFString, 1, nil)
+        ?? (try? generator.copyCGImage(at: .zero, actualTime: nil))
     else { return false }
-    CGImageDestinationAddImage(jpeg, image, [kCGImageDestinationLossyCompressionQuality: 0.76] as CFDictionary)
-    return CGImageDestinationFinalize(jpeg)
+    return writeJPEG(image)
 }
 
-if writeNativeFrame() { exit(0) }
+if writeImagePreview() || writeNativeFrame() { exit(0) }
 
 // WebKit can decode container/codec pairs such as WebM/VP9 for which
 // AVAssetImageGenerator does not produce a frame. Give its local page one

@@ -2,9 +2,20 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+  <key>NSAppTransportSecurity</key>
+  <dict>
+    <key>NSExceptionDomains</key>
+    <dict>
+      <key>127.0.0.1</key>
+      <dict>
+        <key>NSExceptionAllowsInsecureHTTPLoads</key>
+        <true/>
+      </dict>
+    </dict>
+  </dict>
   <key>NSDownloadsFolderUsageDescription</key>
-  <string>TG NestFetch saves your downloaded videos in Downloads when you choose that folder.</string>
+  <string>TG NestFetch saves Telegram attachments in Downloads when you choose that folder.</string>
   <key>NSNetworkVolumesUsageDescription</key>
-  <string>TG NestFetch saves your downloaded videos on a network volume when you choose a folder there.</string>
+  <string>TG NestFetch saves Telegram attachments on a network volume when you choose a folder there.</string>
 </dict>
 </plist>
