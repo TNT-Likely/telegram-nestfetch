@@ -36,7 +36,8 @@ export type JobState =
   | 'saving'
   | 'waiting_save'
   | 'completed'
-  | 'failed';
+  | 'failed'
+  | 'removing';
 
 export type MediaKind = 'video' | 'image' | 'audio' | 'file';
 
@@ -56,6 +57,8 @@ export interface Job {
   outputPath?: string;
   error?: Failure;
   hasThumbnail: boolean;
+  hidden?: boolean;
+  transferDone?: boolean;
 }
 
 export interface Channel {
@@ -92,9 +95,14 @@ type TaskStatus<Result> =
   | { state: 'failed'; error?: Failure }
   | ({ state: 'ready' } & Result);
 
+export interface ProxySettings {
+  address?: string;
+  authenticated?: boolean;
+}
+
 export interface Snapshot {
   account: Account;
-  settings: { folder: string };
+  settings: { folder: string; proxy: ProxySettings };
   jobs: Job[];
 }
 
@@ -106,6 +114,8 @@ interface EngineMethods {
   cancel_login: [undefined, null];
   sign_out: [undefined, null];
   set_folder: [{ folder: string }, null];
+  set_proxy: [{ address: string }, boolean];
+  test_proxy: [{ address?: string }, null];
   enqueue: [{ url: string }, null];
   enqueue_batch: [{ urls: string[] }, BatchResult];
   channels_start: [undefined, TaskReference];
@@ -120,6 +130,9 @@ interface EngineMethods {
   pause: [{ id: string }, null];
   resume: [{ id: string }, null];
   retry: [{ id: string }, null];
+  hide_job: [{ id: string }, null];
+  restore_job: [{ id: string }, null];
+  remove_job: [{ id: string; discardStaged?: boolean }, null];
   save_elsewhere: [{ id: string; folder: string }, null];
   thumbnail: [{ id: string }, string | null];
 }

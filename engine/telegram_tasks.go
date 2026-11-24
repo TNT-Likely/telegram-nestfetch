@@ -108,6 +108,9 @@ func (q *queue) startLocalPlayback(jobID string) (string, error) {
 	if err := q.ctx.Err(); err != nil {
 		return "", err
 	}
+	if q.hold != queueRunning {
+		return "", telegramFailure("busy")
+	}
 	entry := q.byIDLocked(jobID)
 	if entry == nil {
 		return "", telegramFailure("not_found")
@@ -164,6 +167,9 @@ func (q *queue) startTelegramTask(mode string, run taskRun) (string, error) {
 	}
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	if q.hold != queueRunning {
+		return "", telegramFailure("busy")
+	}
 	if q.telegram.Status().State != "connected" {
 		return "", telegramFailure("login_required")
 	}

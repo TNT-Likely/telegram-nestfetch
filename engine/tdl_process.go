@@ -48,6 +48,9 @@ func (p *tdlProvider) tdlCommand(ctx context.Context, args ...string) *exec.Cmd 
 	cmd := exec.CommandContext(ctx, p.binary, append(flags, args...)...)
 	cmd.Dir = p.dir
 	cmd.Env = tdlEnvironment(os.Environ(), p.home)
+	if p.proxy != "" {
+		cmd.Env = append(cmd.Env, "TDL_PROXY="+p.proxy)
+	}
 	cmd.Cancel = func() error {
 		if runtime.GOOS == "windows" {
 			return cmd.Process.Kill()

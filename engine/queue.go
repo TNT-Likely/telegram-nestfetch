@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -26,6 +27,7 @@ const (
 	waitingSave = "waiting_save"
 	completed   = "completed"
 	failed      = "failed"
+	removing    = "removing"
 )
 
 type Job struct {
@@ -44,13 +46,14 @@ type Job struct {
 	OutputPath   string    `json:"outputPath"`
 	Error        *Failure  `json:"error,omitempty"`
 	HasThumbnail bool      `json:"hasThumbnail"`
+	Hidden       bool      `json:"hidden,omitempty"`
+	TransferDone bool      `json:"transferDone,omitempty"`
 }
 
 type queueEntry struct {
 	Job
 	TopicID       int         `json:"topicId,omitempty"`
 	DocumentID    int64       `json:"documentId,omitempty"`
-	TransferDone  bool        `json:"transferDone,omitempty"`
 	HideThumbnail bool        `json:"hideThumbnail,omitempty"`
 	Save          *saveIntent `json:"save,omitempty"`
 }
@@ -68,7 +71,8 @@ type queueSnapshot struct {
 }
 
 type settings struct {
-	Folder string `json:"folder"`
+	Folder string              `json:"folder"`
+	Proxy  telegramProxyStatus `json:"proxy"`
 }
 
 type queue struct {
@@ -78,8 +82,11 @@ type queue struct {
 	dataDir       string
 	frameHelper   string
 	telegram      Telegram
+	proxyAddress  *url.URL
+	hold          queueHold
 	activeID      string
 	cancelJob     context.CancelFunc
+	activeDone    chan struct{}
 	lastBytesAt   time.Time
 	accountBusy   bool
 	telegramTask  *mediaTask
@@ -106,21 +113,27 @@ func openQueue(ctx context.Context, dataDir, downloadDir, frameHelper string, te
 	if err := os.MkdirAll(filepath.Join(dataDir, "thumbnails"), 0700); err != nil {
 		return nil, err
 	}
+	proxyAddress, err := readTelegramProxy(dataDir)
+	if err != nil {
+		return nil, err
+	}
 	worker, cancel := context.WithCancel(ctx)
 	q := &queue{
-		state:       queueState{Version: 1, Folder: filepath.Clean(downloadDir), Jobs: make([]*queueEntry, 0)},
-		statePath:   filepath.Join(dataDir, "queue.json"),
-		dataDir:     dataDir,
-		frameHelper: frameHelper,
-		telegram:    telegram,
-		ctx:         worker,
-		cancel:      cancel,
-		wake:        make(chan struct{}, 1),
+		state:        queueState{Version: 1, Folder: filepath.Clean(downloadDir), Jobs: make([]*queueEntry, 0)},
+		statePath:    filepath.Join(dataDir, "queue.json"),
+		dataDir:      dataDir,
+		frameHelper:  frameHelper,
+		telegram:     telegram,
+		proxyAddress: proxyAddress,
+		ctx:          worker,
+		cancel:       cancel,
+		wake:         make(chan struct{}, 1),
 	}
 	if err := q.load(); err != nil {
 		cancel()
 		return nil, err
 	}
+	q.recoverRemovals()
 	q.startThumbnailRecovery()
 	q.workers.Go(q.run)
 	return q, nil
@@ -185,7 +198,7 @@ func (q *queue) load() error {
 		switch entry.State {
 		case resolving, downloading, saving:
 			entry.State = queued
-		case queued, paused, waitingSave, completed, failed:
+		case queued, paused, waitingSave, completed, failed, removing:
 		default:
 			return errors.New("invalid persisted download state")
 		}
@@ -229,7 +242,11 @@ func (q *queue) snapshot() queueSnapshot {
 		}
 		jobs = append(jobs, job)
 	}
-	return queueSnapshot{Account: account, Settings: settings{Folder: q.state.Folder}, Jobs: jobs}
+	return queueSnapshot{
+		Account:  account,
+		Settings: settings{Folder: q.state.Folder, Proxy: publicTelegramProxy(q.proxyAddress)},
+		Jobs:     jobs,
+	}
 }
 
 func (q *queue) persistLocked() error {
@@ -337,7 +354,7 @@ func (q *queue) setFolder(path string) error {
 
 func (q *queue) accountAction(action func() error) error {
 	q.mu.Lock()
-	if q.activeID != "" || q.accountBusy {
+	if q.activeID != "" || q.accountBusy || q.hold != queueRunning {
 		q.mu.Unlock()
 		return &Failure{Code: "busy"}
 	}
@@ -584,7 +601,7 @@ func (q *queue) run() {
 
 func (q *queue) workNext() bool {
 	q.mu.Lock()
-	if q.accountBusy {
+	if q.accountBusy || q.hold != queueRunning {
 		q.mu.Unlock()
 		return false
 	}
@@ -623,14 +640,16 @@ func (q *queue) workNext() bool {
 		return true
 	}
 	ctx, cancel := context.WithCancel(q.ctx)
-	q.activeID, q.cancelJob = chosen.ID, cancel
+	done := make(chan struct{})
+	q.activeID, q.cancelJob, q.activeDone = chosen.ID, cancel, done
 	job := *chosen
 	q.mu.Unlock()
 
 	q.process(ctx, job)
 	cancel()
 	q.mu.Lock()
-	q.activeID, q.cancelJob = "", nil
+	q.activeID, q.cancelJob, q.activeDone = "", nil, nil
+	close(done)
 	q.mu.Unlock()
 	return true
 }
@@ -736,7 +755,7 @@ func (q *queue) fetch(ctx context.Context, entry queueEntry) (queueEntry, bool) 
 		q.mu.Lock()
 		defer q.mu.Unlock()
 		job := q.byIDLocked(entry.ID)
-		if job.State != downloading || ctx.Err() != nil {
+		if job == nil || job.State != downloading || ctx.Err() != nil {
 			return
 		}
 		now := time.Now()
@@ -769,7 +788,7 @@ func (q *queue) jobUpdate(ctx context.Context, id string, update func(*queueEntr
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	entry := q.byIDLocked(id)
-	if ctx.Err() != nil || (entry.State != resolving && entry.State != downloading && entry.State != saving) {
+	if entry == nil || ctx.Err() != nil || (entry.State != resolving && entry.State != downloading && entry.State != saving) {
 		return false
 	}
 	if err := q.updateLocked(entry, update); err != nil {

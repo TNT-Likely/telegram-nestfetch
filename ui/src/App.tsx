@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
-import { ArrowDownToLine, ChevronDown, ChevronRight, CircleCheck, Folder, Layers, Library, Link2, Monitor, Moon, Play, Send, Sun, X } from 'lucide-react';
+import { ArrowDownToLine, ChevronDown, ChevronRight, CircleCheck, Folder, Layers, Library, Link2, Monitor, Moon, Play, Send, Settings, Sun, X } from 'lucide-react';
 import { AccountDialog } from './AccountDialog';
 import { ChannelAttachments } from './ChannelAttachments';
 import { countByView, Downloads } from './Downloads';
-import type { JobAction, View } from './Downloads';
+import type { JobAction, JobActionOptions, View } from './Downloads';
+import { SettingsDialog } from './SettingsDialog';
 import { VideoPreview } from './VideoPreview';
 import type { PreviewTarget, TelegramPreviewTarget } from './VideoPreview';
 import { chooseFolder, failureOf, openProjectRepository, openTelegramSettings, request, revealJob, setWindowTheme } from './api';
@@ -195,10 +196,11 @@ export function App() {
   const [link, setLink] = useState('');
   const [busy, setBusy] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [appError, setAppError] = useState<Failure>();
   const [linkError, setLinkError] = useState<Failure>();
   const [accountError, setAccountError] = useState<Failure>();
-  const [notice, setNotice] = useState<'added' | 'folderChanged' | BatchResult>();
+  const [notice, setNotice] = useState<'added' | 'folderChanged' | 'downloadHidden' | 'downloadRestored' | 'downloadRemoved' | BatchResult>();
   const [preview, setPreview] = useState<PreviewTarget>();
   const input = useRef<HTMLInputElement>(null);
   const actionLock = useRef(false);
@@ -322,17 +324,25 @@ export function App() {
     }, setAppError, 'picker_failed');
   }
 
-  function onJobAction(job: Job, action: JobAction) {
-    void run(async () => {
+  async function onJobAction(job: Job, action: JobAction, options?: JobActionOptions) {
+    const succeeded = await run(async () => {
       if (action === 'reveal') {
         await revealJob(job.id);
       } else if (action === 'save_elsewhere') {
         const folder = await chooseFolder(job.folder);
         if (folder) await request('save_elsewhere', { id: job.id, folder });
+      } else if (action === 'remove_job') {
+        await request(action, { id: job.id, discardStaged: options?.discardStaged });
       } else {
         await request(action, { id: job.id });
       }
-    }, setAppError, action === 'reveal' ? 'reveal_failed' : action === 'save_elsewhere' ? 'picker_failed' : 'unexpected');
+    }, options?.onError ?? setAppError, action === 'reveal' ? 'reveal_failed' : action === 'save_elsewhere' ? 'picker_failed' : 'unexpected');
+    if (succeeded) {
+      if (action === 'hide_job') setNotice('downloadHidden');
+      if (action === 'restore_job') setNotice('downloadRestored');
+      if (action === 'remove_job') setNotice('downloadRemoved');
+    }
+    return succeeded;
   }
 
   const jobs = snapshot?.jobs ?? [];
@@ -371,6 +381,10 @@ export function App() {
               <button type="button" lang="zh-CN" aria-label="简体中文" aria-pressed={preferences.language === 'zh'} onClick={() => setPreferences({ ...preferences, language: 'zh' })}>中文</button>
               <button type="button" lang="en" aria-label="English" aria-pressed={preferences.language === 'en'} onClick={() => setPreferences({ ...preferences, language: 'en' })}>EN</button>
             </div>
+            <button className="project-link settings-button" type="button" title={t('appSettings')} aria-label={t('appSettings')}
+              aria-haspopup="dialog" onClick={() => setSettingsOpen(true)}>
+              <Settings aria-hidden="true" />
+            </button>
             <button className="project-link" type="button" title={t('projectRepository')} aria-label={t('projectRepository')}
               onClick={() => { void openProjectRepository().catch(error => setAppError(failureOf(error, 'open_failed'))); }}>
               <img src={githubMark} alt="" width="16" height="16" />
@@ -431,6 +445,8 @@ export function App() {
       {view !== 'channels' && <div className="notifications" role="status" aria-live="polite">
         {notification && <span>{notification}</span>}
       </div>}
+      {settingsOpen && <SettingsDialog proxy={snapshot?.settings.proxy} t={t} language={preferences.language}
+        onProxyChanged={async () => { await refresh(true); }} onClose={() => setSettingsOpen(false)} />}
       {preview && (preview.jobId || account?.state === 'connected') && !accountOpen && (
         <VideoPreview key={preview.jobId ?? preview.url} target={preview} t={t} language={preferences.language} onClose={() => setPreview(undefined)} onDownload={addFromPreview} />
       )}

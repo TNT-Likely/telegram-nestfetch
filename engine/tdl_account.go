@@ -24,6 +24,7 @@ type tdlProvider struct {
 	dir     string
 	home    string
 	binary  string
+	proxy   string
 	account Account
 	login   *tdlLogin
 }
@@ -52,10 +53,15 @@ func newTDLProvider(dataDir, binary string) (*tdlProvider, error) {
 	if info, err := os.Stat(binary); err != nil || !info.Mode().IsRegular() {
 		return nil, telegramFailure("tdl_unavailable")
 	}
+	proxyAddress, err := readTelegramProxy(dataDir)
+	if err != nil {
+		return nil, err
+	}
 
 	dir := filepath.Join(dataDir, "tdl")
 	p := &tdlProvider{
 		dir: dir, home: filepath.Join(dir, "home"), binary: binary, account: tdlAccount("disconnected"),
+		proxy: telegramProxyURL(proxyAddress),
 	}
 	for _, path := range []string{p.dir, p.home, filepath.Join(p.dir, "data")} {
 		if err := ensureTDLDirectory(path); err != nil {

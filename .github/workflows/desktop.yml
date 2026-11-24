@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      signed_release:
+        description: Build signed update packages for a version tag on main and attach them to a draft release
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -32,6 +37,8 @@ jobs:
             target: x86_64-unknown-linux-gnu
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: ${{ inputs.signed_release && '0' || '1' }}
       - uses: actions/setup-node@v6
         with:
           node-version: '24'
@@ -39,6 +46,15 @@ jobs:
           cache-dependency-path: |
             package-lock.json
             ui/package-lock.json
+      - name: Verify the tagged version
+        if: inputs.signed_release
+        shell: bash
+        env:
+          RELEASE_REF: ${{ github.ref }}
+        run: |
+          version=$(node -p 'require("./src-tauri/tauri.conf.json").version')
+          test "$RELEASE_REF" = "refs/tags/v$version"
+          git merge-base --is-ancestor HEAD origin/main
       - uses: actions/setup-go@v6
         with:
           go-version: '1.27.x'
@@ -61,14 +77,36 @@ jobs:
       - name: Check frontend
         run: npm run check
       - name: Compile macOS application
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && !inputs.signed_release
         run: npm run build -- --no-bundle --target ${{ matrix.target }}
       - name: Verify a WebM/VP9 thumbnail
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && !inputs.signed_release
         run: xcrun swift scripts/test-video-frame.swift src-tauri/resources/tg-nestfetch-frame scripts/testdata/red-blue-vp9.webm
       - name: Build Windows and Linux installers
-        if: runner.os != 'macOS'
+        if: runner.os != 'macOS' && !inputs.signed_release
         run: npm run build -- --target ${{ matrix.target }}
+      - name: Build signed release packages
+        if: inputs.signed_release
+        shell: bash
+        env:
+          RELEASE_TARGET: ${{ matrix.target }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          test -n "$TAURI_SIGNING_PRIVATE_KEY"
+          bundles=()
+          if [[ "$RUNNER_OS" == macOS ]]; then
+            export APPLE_SIGNING_IDENTITY=-
+            bundles=(--bundles app dmg)
+          fi
+          npm run build -- --target "$RELEASE_TARGET" --config src-tauri/tauri.release.conf.json "${bundles[@]}" -- --locked
+      - name: Smoke-test the macOS bundle
+        if: runner.os == 'macOS' && inputs.signed_release
+        run: |
+          app='src-tauri/target/${{ matrix.target }}/release/bundle/macos/TG NestFetch.app'
+          codesign --verify --deep --strict "$app"
+          node scripts/check-bundled-engine.mjs "$app/Contents/MacOS"
+          test -x "$app/Contents/Resources/tg-nestfetch-frame"
       - name: Smoke-test Windows installation
         if: runner.os == 'Windows'
         shell: pwsh
@@ -96,12 +134,52 @@ jobs:
           "$appimage" --appimage-extract > /dev/null
           node "$GITHUB_WORKSPACE/scripts/check-bundled-engine.mjs" squashfs-root/usr/bin
       - uses: actions/upload-artifact@v6
-        if: runner.os != 'macOS'
+        if: runner.os != 'macOS' || inputs.signed_release
         with:
           name: TG-NestFetch-${{ matrix.target }}
           if-no-files-found: error
           compression-level: 0
           path: |
             src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*-setup.exe
+            src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*-setup.exe.sig
             src-tauri/target/${{ matrix.target }}/release/bundle/deb/*.deb
             src-tauri/target/${{ matrix.target }}/release/bundle/appimage/*.AppImage
+            src-tauri/target/${{ matrix.target }}/release/bundle/appimage/*.AppImage.sig
+            src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+            src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz
+            src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz.sig
+
+  release_draft:
+    name: Assemble verified release assets
+    if: inputs.signed_release
+    needs: check
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - uses: actions/download-artifact@v7
+        with:
+          path: release-inputs
+          pattern: TG-NestFetch-*
+      - name: Install minisign
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y minisign
+      - name: Verify signatures and generate the update manifest
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: node scripts/prepare-release.mjs release-inputs release-assets "$GITHUB_REPOSITORY" "$RELEASE_TAG"
+      - name: Attach installers to the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" --draft --verify-tag --title "TG NestFetch $RELEASE_TAG" --generate-notes
+          fi
+          test "$(gh release view "$RELEASE_TAG" --json isDraft --jq '.isDraft')" = true
+          gh release upload "$RELEASE_TAG" --clobber release-assets/*

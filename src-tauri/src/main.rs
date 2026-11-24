@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod engine;
+mod updates;
 
 use engine::{Engine, Failure};
 use serde_json::{json, Value};
@@ -19,11 +20,34 @@ async fn engine_request(
     params: Option<Value>,
 ) -> Result<Value, Failure> {
     match method.as_str() {
-        "snapshot" | "configure" | "begin_login" | "login_password" | "cancel_login"
-        | "sign_out" | "set_folder" | "enqueue" | "pause" | "resume" | "retry"
-        | "save_elsewhere" | "thumbnail" | "enqueue_batch" | "channels_start" | "channels_status"
-        | "attachments_start" | "attachments_status" | "browse_cancel" | "preview_start"
-        | "local_preview_start" | "preview_status" | "preview_stop" => engine.request(&method, params).await,
+        "snapshot"
+        | "configure"
+        | "begin_login"
+        | "login_password"
+        | "cancel_login"
+        | "sign_out"
+        | "set_folder"
+        | "enqueue"
+        | "pause"
+        | "resume"
+        | "retry"
+        | "hide_job"
+        | "restore_job"
+        | "remove_job"
+        | "set_proxy"
+        | "test_proxy"
+        | "save_elsewhere"
+        | "thumbnail"
+        | "enqueue_batch"
+        | "channels_start"
+        | "channels_status"
+        | "attachments_start"
+        | "attachments_status"
+        | "browse_cancel"
+        | "preview_start"
+        | "local_preview_start"
+        | "preview_status"
+        | "preview_stop" => engine.request(&method, params).await,
         _ => Err(Failure::new("invalid_request")),
     }
 }
@@ -103,6 +127,8 @@ fn main() {
         }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(updates::Updates::default())
         .setup(|app| {
             let paths = app.path();
             let data = paths.app_data_dir()?;
@@ -130,7 +156,10 @@ fn main() {
             choose_folder,
             reveal_job,
             open_telegram_settings,
-            open_project_repository
+            open_project_repository,
+            updates::check_updates,
+            updates::install_update,
+            updates::open_release_page
         ])
         .build(tauri::generate_context!())
         .expect("failed to start TG NestFetch");

@@ -12,6 +12,7 @@ Browse Telegram channels, preview videos, and batch-download attachments to a fo
 - Open **Channel files**, pick a subscribed channel or paste a public channel link, and browse a date range. Filter by file type and queue several attachments at once.
 - Preview a video before saving. The player shows buffering progress and Telegram transfer speed, and lets you jump to another part of the video.
 - Play finished videos from the **Completed** list, including offline playback from local storage.
+- Open a download's details to see its Telegram link and save location. Hide completed entries, restore them later, or cancel a download from the same panel.
 - Save to a local folder or a mounted network volume. Pause, retry, or choose a new destination from the download queue.
 
 The interface supports English and Simplified Chinese in light, dark, and system appearance.
@@ -44,6 +45,11 @@ Download the package for your computer. [Latest release](https://github.com/TNT-
 In TG NestFetch, choose **Sign in with QR code**. On your phone, open **Telegram → Settings → Devices → Link Desktop Device** and scan the code. Enter your two-step verification password if prompted.
 
 The app bundles [tdl](https://github.com/iyear/tdl) and uses a separate Telegram session. A preview waits for the current transfer to finish or pause, and closing the player lets the queue continue. Resuming an interrupted tdl download restarts that file. A finished transfer stays in local staging when its destination is unavailable, so you can retry saving it or choose another folder.
+
+## Connection and updates
+
+- In **Settings → Telegram proxy**, enter an HTTP or SOCKS5 proxy with its port, for example `socks5://127.0.0.1:7890`. You can test the connection before saving it. If your proxy requires credentials, use `scheme://username:password@host:port` with URL-encoded credentials.
+- In **Settings → Software update**, choose **Check for updates**. macOS, the Windows installer, and the Linux AppImage support signed in-app installation. On Linux with a DEB, open the release page and install the newer DEB with your package manager.
 
 ## Build from source
 

@@ -32,7 +32,13 @@ pub struct Engine {
     data_dir: PathBuf,
     downloads: PathBuf,
     frame_helper: Option<PathBuf>,
-    process: Mutex<Option<Process>>,
+    session: Mutex<EngineSession>,
+}
+
+#[derive(Default)]
+struct EngineSession {
+    process: Option<Process>,
+    installing_update: bool,
 }
 
 struct Process {
@@ -61,7 +67,7 @@ impl Engine {
             data_dir,
             downloads,
             frame_helper,
-            process: Mutex::new(None),
+            session: Mutex::default(),
         }
     }
 
@@ -104,7 +110,29 @@ impl Engine {
     }
 
     pub async fn request(&self, method: &str, params: Option<Value>) -> Result<Value, Failure> {
-        let mut process = self.process.lock().await;
+        let mut session = self.session.lock().await;
+        if session.installing_update {
+            return Err(Failure::new("update_busy"));
+        }
+        let result = self
+            .request_locked(&mut session.process, method, params)
+            .await?;
+        if method == "set_proxy" && result == Value::Bool(true) {
+            // The old sidecar has reserved the queue for the network change.
+            // Release it under the IPC lock so another request cannot use the old configuration.
+            if let Some(process) = session.process.take() {
+                process.terminate().await;
+            }
+        }
+        Ok(result)
+    }
+
+    async fn request_locked(
+        &self,
+        process: &mut Option<Process>,
+        method: &str,
+        params: Option<Value>,
+    ) -> Result<Value, Failure> {
         if process.is_none() {
             *process = Some(self.start()?);
         }
@@ -131,8 +159,32 @@ impl Engine {
         }
     }
 
+    pub async fn prepare_update(&self) -> Result<(), Failure> {
+        let mut session = self.session.lock().await;
+        self.request_locked(&mut session.process, "prepare_update", None)
+            .await?;
+        session.installing_update = true;
+        // Windows exits from the updater library without a Tauri RunEvent::Exit.
+        // Close the engine before NSIS replaces its executable.
+        #[cfg(windows)]
+        if let Some(process) = session.process.take() {
+            process.terminate().await;
+        }
+        Ok(())
+    }
+
+    pub async fn finish_update(&self) {
+        let mut session = self.session.lock().await;
+        if session.process.is_some() {
+            let _ = self
+                .request_locked(&mut session.process, "finish_update", None)
+                .await;
+        }
+        session.installing_update = false;
+    }
+
     pub async fn shutdown(&self) {
-        if let Some(process) = self.process.lock().await.take() {
+        if let Some(process) = self.session.lock().await.process.take() {
             process.terminate().await;
         }
     }

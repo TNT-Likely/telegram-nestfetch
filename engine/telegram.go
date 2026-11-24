@@ -21,6 +21,7 @@ import (
 	"github.com/gotd/td/telegram"
 	"github.com/gotd/td/telegram/auth"
 	"github.com/gotd/td/telegram/auth/qrlogin"
+	"github.com/gotd/td/telegram/dcs"
 	"github.com/gotd/td/tg"
 	"github.com/gotd/td/tgerr"
 )
@@ -51,6 +52,7 @@ type telegramProvider struct {
 	run           *telegramRun
 	apiPath       string
 	storage       *telegramStorage
+	resolver      dcs.Resolver
 }
 
 var _ Telegram = (*telegramProvider)(nil)
@@ -84,6 +86,17 @@ func newTelegram(dataDir string, defaults APIConfig) (Telegram, error) {
 		account: Account{State: "setup"},
 		apiPath: filepath.Join(dir, "api.json"),
 		storage: &telegramStorage{path: filepath.Join(dir, "session.json")},
+	}
+	proxyAddress, err := readTelegramProxy(dataDir)
+	if err != nil {
+		return nil, err
+	}
+	if proxyAddress != nil {
+		dial, err := newTelegramProxyDialer(proxyAddress)
+		if err != nil {
+			return nil, err
+		}
+		provider.resolver = dcs.Plain(dcs.PlainOptions{Dial: dial})
 	}
 	data, err := os.ReadFile(provider.apiPath)
 	switch {
@@ -206,6 +219,7 @@ func (p *telegramProvider) start(restore bool) {
 	run.client = telegram.NewClient(config.APIID, config.APIHash, telegram.Options{
 		SessionStorage: p.storage,
 		UpdateHandler:  dispatch,
+		Resolver:       p.resolver,
 		Device: telegram.DeviceConfig{
 			DeviceModel:   "TG NestFetch",
 			SystemVersion: runtime.GOOS + "/" + runtime.GOARCH,

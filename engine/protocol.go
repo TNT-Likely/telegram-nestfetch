@@ -65,11 +65,13 @@ func handleRequest(ctx context.Context, q *queue, line []byte) response {
 
 func dispatch(ctx context.Context, q *queue, message request) (any, error) {
 	var args struct {
-		ID       string   `json:"id"`
-		URL      string   `json:"url"`
-		URLs     []string `json:"urls"`
-		Folder   string   `json:"folder"`
-		Password string   `json:"password"`
+		ID            string   `json:"id"`
+		URL           string   `json:"url"`
+		URLs          []string `json:"urls"`
+		Folder        string   `json:"folder"`
+		Password      string   `json:"password"`
+		DiscardStaged bool     `json:"discardStaged"`
+		Address       *string  `json:"address"`
 		APIConfig
 		channelQuery
 	}
@@ -96,6 +98,18 @@ func dispatch(ctx context.Context, q *queue, message request) (any, error) {
 		return nil, q.accountAction(func() error { return q.telegram.SignOut(timeout) })
 	case "set_folder":
 		return nil, q.setFolder(args.Folder)
+	case "set_proxy":
+		if args.Address == nil {
+			return nil, &Failure{Code: "invalid_request"}
+		}
+		return q.setProxy(*args.Address)
+	case "test_proxy":
+		return nil, q.testProxy(ctx, args.Address)
+	case "prepare_update":
+		return nil, q.prepareUpdate()
+	case "finish_update":
+		q.finishUpdate()
+		return nil, nil
 	case "enqueue":
 		return q.enqueue(args.URL)
 	case "enqueue_batch":
@@ -129,6 +143,10 @@ func dispatch(ctx context.Context, q *queue, message request) (any, error) {
 		return nil, q.resume(args.ID)
 	case "retry":
 		return nil, q.retry(args.ID)
+	case "hide_job", "restore_job":
+		return nil, q.setJobHidden(args.ID, message.Method == "hide_job")
+	case "remove_job":
+		return nil, q.removeJob(ctx, args.ID, args.DiscardStaged)
 	case "save_elsewhere":
 		return nil, q.saveElsewhere(args.ID, args.Folder)
 	case "thumbnail":
