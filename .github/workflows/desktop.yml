@@ -10,6 +10,10 @@ on:
         description: Build signed update packages for a version tag on main and attach them to a draft release
         type: boolean
         default: false
+      release_tag:
+        description: Existing version tag to build with the current workflow
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -38,6 +42,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
+          ref: ${{ inputs.signed_release && inputs.release_tag && format('refs/tags/{0}', inputs.release_tag) || github.ref }}
           fetch-depth: ${{ inputs.signed_release && '0' || '1' }}
       - uses: actions/setup-node@v6
         with:
@@ -50,10 +55,11 @@ jobs:
         if: inputs.signed_release
         shell: bash
         env:
-          RELEASE_REF: ${{ github.ref }}
+          RELEASE_REF: ${{ inputs.release_tag && format('refs/tags/{0}', inputs.release_tag) || github.ref }}
         run: |
           version=$(node -p 'require("./src-tauri/tauri.conf.json").version')
           test "$RELEASE_REF" = "refs/tags/v$version"
+          test "$(git rev-parse HEAD)" = "$(git rev-parse "${RELEASE_REF}^{commit}")"
           git merge-base --is-ancestor HEAD origin/main
       - uses: actions/setup-go@v6
         with:
@@ -86,7 +92,7 @@ jobs:
         if: runner.os != 'macOS' && !inputs.signed_release
         run: npm run build -- --target ${{ matrix.target }}
       - name: Build signed release packages
-        if: inputs.signed_release
+        if: inputs.signed_release && runner.os != 'Windows'
         shell: bash
         env:
           RELEASE_TARGET: ${{ matrix.target }}
@@ -100,6 +106,16 @@ jobs:
             bundles=(--bundles app dmg)
           fi
           npm run build -- --target "$RELEASE_TARGET" --config src-tauri/tauri.release.conf.json "${bundles[@]}" -- --locked
+      - name: Build signed Windows release package
+        if: inputs.signed_release && runner.os == 'Windows'
+        shell: pwsh
+        env:
+          RELEASE_TARGET: ${{ matrix.target }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          if (!$env:TAURI_SIGNING_PRIVATE_KEY) { throw 'Missing updater signing key' }
+          npm run build -- --target $env:RELEASE_TARGET --config src-tauri/tauri.release.conf.json -- --locked
       - name: Smoke-test the macOS bundle
         if: runner.os == 'macOS' && inputs.signed_release
         run: |
@@ -158,6 +174,8 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.release_tag && format('refs/tags/{0}', inputs.release_tag) || github.ref }}
       - uses: actions/setup-node@v6
         with:
           node-version: '24'
@@ -171,12 +189,12 @@ jobs:
           sudo apt-get install -y minisign
       - name: Verify signatures and generate the update manifest
         env:
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
         run: node scripts/prepare-release.mjs release-inputs release-assets "$GITHUB_REPOSITORY" "$RELEASE_TAG"
       - name: Attach installers to the draft release
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
         run: |
           if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             gh release create "$RELEASE_TAG" --draft --verify-tag --title "TG NestFetch $RELEASE_TAG" --generate-notes
