@@ -47,7 +47,7 @@ func (p *telegramProvider) Inspect(parent context.Context, link MessageLink) (Me
 	defer cleanup()
 
 	lookup, cancel := context.WithTimeout(ctx, connectDeadline)
-	attachment, err := findTelegramMedia(lookup, client.API(), link)
+	attachment, err := findTelegramMedia(lookup, client, link)
 	cancel()
 	if err != nil {
 		return Media{}, telegramOperationError(ctx, err)
@@ -69,7 +69,7 @@ func (p *telegramProvider) Download(parent context.Context, link MessageLink, me
 	defer cleanup()
 
 	lookup, cancel := context.WithTimeout(ctx, connectDeadline)
-	attachment, err := findTelegramMedia(lookup, client.API(), link)
+	attachment, err := findTelegramMedia(lookup, client, link)
 	cancel()
 	if err != nil {
 		return telegramOperationError(ctx, err)
@@ -160,7 +160,7 @@ func streamTelegramMedia(
 		WithSize(attachment.media.Bytes).
 		WithOffset(offset).
 		WithRefresh(func(ctx context.Context) (tg.InputFileLocationClass, error) {
-			updated, err := fetchTelegramMedia(ctx, client.API(), attachment.channel, link, attachment.media.Source)
+			updated, err := fetchTelegramMedia(ctx, client, attachment.channel, link, attachment.media.Source)
 			if err != nil {
 				return nil, err
 			}
@@ -213,12 +213,15 @@ func telegramOperationError(ctx context.Context, err error) error {
 	return mapTelegramFailure(err)
 }
 
-func findTelegramMedia(ctx context.Context, api *tg.Client, link MessageLink) (telegramMedia, error) {
-	channel, source, err := resolveTelegramChannel(ctx, api, link)
+func findTelegramMedia(ctx context.Context, client *telegram.Client, link MessageLink) (telegramMedia, error) {
+	if link.SavedAccountID != 0 {
+		return fetchTelegramMedia(ctx, client, nil, link, "")
+	}
+	channel, source, err := resolveTelegramChannel(ctx, client.API(), link)
 	if err != nil {
 		return telegramMedia{}, err
 	}
-	return fetchTelegramMedia(ctx, api, channel, link, source)
+	return fetchTelegramMedia(ctx, client, channel, link, source)
 }
 
 func resolveTelegramChannel(ctx context.Context, api *tg.Client, link MessageLink) (*tg.InputChannel, string, error) {
@@ -271,12 +274,24 @@ func resolveTelegramChannel(ctx context.Context, api *tg.Client, link MessageLin
 }
 
 func fetchTelegramMedia(
-	ctx context.Context, api *tg.Client, channel *tg.InputChannel, link MessageLink, source string,
+	ctx context.Context, client *telegram.Client, channel *tg.InputChannel, link MessageLink, source string,
 ) (telegramMedia, error) {
-	result, err := api.ChannelsGetMessages(ctx, &tg.ChannelsGetMessagesRequest{
-		Channel: channel,
-		ID:      []tg.InputMessageClass{&tg.InputMessageID{ID: link.MessageID}},
-	})
+	api := client.API()
+	ids := []tg.InputMessageClass{&tg.InputMessageID{ID: link.MessageID}}
+	var result tg.MessagesMessagesClass
+	var err error
+	if link.SavedAccountID != 0 {
+		self, lookupErr := client.Self(ctx)
+		if lookupErr != nil {
+			return telegramMedia{}, lookupErr
+		}
+		if self.ID != link.SavedAccountID {
+			return telegramMedia{}, telegramFailure("saved_account_mismatch")
+		}
+		result, err = api.MessagesGetMessages(ctx, ids)
+	} else {
+		result, err = api.ChannelsGetMessages(ctx, &tg.ChannelsGetMessagesRequest{Channel: channel, ID: ids})
+	}
 	if err != nil {
 		return telegramMedia{}, err
 	}
@@ -286,7 +301,7 @@ func fetchTelegramMedia(
 	}
 	for _, chat := range messages.GetChats() {
 		c, ok := chat.(*tg.Channel)
-		if !ok || c.ID != channel.ChannelID {
+		if !ok || channel == nil || c.ID != channel.ChannelID {
 			continue
 		}
 		if c.Noforwards {
@@ -301,11 +316,20 @@ func fetchTelegramMedia(
 		if !ok || msg.ID != link.MessageID {
 			continue
 		}
-		if peer, ok := msg.PeerID.(*tg.PeerChannel); ok && peer.ChannelID == channel.ChannelID {
+		if telegramAttachmentPeer(msg.PeerID, channel, link.SavedAccountID) {
 			return telegramMediaFromMessage(msg, channel, source)
 		}
 	}
 	return telegramMedia{}, telegramFailure("message_not_found")
+}
+
+func telegramAttachmentPeer(peer tg.PeerClass, channel *tg.InputChannel, savedAccountID int64) bool {
+	if channel != nil {
+		ch, ok := peer.(*tg.PeerChannel)
+		return ok && ch.ChannelID == channel.ChannelID
+	}
+	user, ok := peer.(*tg.PeerUser)
+	return ok && savedAccountID > 0 && user.UserID == savedAccountID
 }
 
 func telegramMediaFromMessage(message *tg.Message, channel *tg.InputChannel, source string) (telegramMedia, error) {

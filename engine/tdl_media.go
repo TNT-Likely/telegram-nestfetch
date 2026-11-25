@@ -43,8 +43,14 @@ type tdlRawMessage struct {
 	Flags      uint32
 	Noforwards bool
 	TTLPeriod  int
-	PeerID     struct{ ChannelID int64 }
+	PeerID     tdlRawPeer
 	Media      *tdlRawMedia
+}
+
+type tdlRawPeer struct {
+	ChannelID int64
+	UserID    int64
+	ChatID    int64
 }
 
 type tdlRawMedia struct {
@@ -87,7 +93,8 @@ type tdlRawPhoto struct {
 }
 
 type tdlMediaRecord struct {
-	channelID int64
+	peerID    int64
+	saved     bool
 	messageID int
 	file      string
 	media     Media
@@ -98,6 +105,10 @@ func decodeTDLArchive(data []byte, link MessageLink) (tdlMediaRecord, error) {
 	if err := json.Unmarshal(data, &archive); err != nil {
 		return tdlMediaRecord{}, &Failure{Code: "telegram_error"}
 	}
+	saved := link.SavedAccountID != 0
+	if saved && archive.ID != link.SavedAccountID {
+		return tdlMediaRecord{}, telegramFailure("saved_account_mismatch")
+	}
 
 	if len(archive.Messages) != 1 || archive.Messages[0].ID != link.MessageID ||
 		(link.ChannelID != 0 && archive.ID != link.ChannelID) {
@@ -107,13 +118,17 @@ func decodeTDLArchive(data []byte, link MessageLink) (tdlMediaRecord, error) {
 	if link.Username != "" {
 		source = "@" + link.Username
 	}
-	return decodeTDLMessage(archive.Messages[0], archive.ID, source)
+	return decodeTDLMessage(archive.Messages[0], archive.ID, saved, source)
 }
 
-func decodeTDLMessage(item tdlArchiveMessage, channelID int64, source string) (tdlMediaRecord, error) {
+func decodeTDLMessage(item tdlArchiveMessage, peerID int64, saved bool, source string) (tdlMediaRecord, error) {
 	raw := item.Raw
-	if channelID <= 0 || item.ID <= 0 || raw == nil || raw.ID != item.ID ||
-		item.Type != "message" || raw.PeerID.ChannelID != channelID {
+	peer := tdlRawPeer{ChannelID: peerID}
+	if saved {
+		peer = tdlRawPeer{UserID: peerID}
+	}
+	if peerID <= 0 || item.ID <= 0 || raw == nil || raw.ID != item.ID ||
+		item.Type != "message" || raw.PeerID != peer {
 		return tdlMediaRecord{}, &Failure{Code: "message_not_found"}
 	}
 	if raw.Noforwards || raw.Flags&(1<<26) != 0 || raw.TTLPeriod != 0 {
@@ -147,7 +162,7 @@ func decodeTDLMessage(item tdlArchiveMessage, channelID int64, source string) (t
 	default:
 		return tdlMediaRecord{}, &Failure{Code: "no_media"}
 	}
-	return tdlMediaRecord{channelID: channelID, messageID: item.ID, file: item.File, media: result}, nil
+	return tdlMediaRecord{peerID: peerID, saved: saved, messageID: item.ID, file: item.File, media: result}, nil
 }
 
 func tdlDocument(media *tdlRawMedia, messageID int, exportName, source string) Media {
@@ -255,7 +270,9 @@ func (p *tdlProvider) readTDLMedia(ctx context.Context, link MessageLink, refres
 	output := filepath.Join(directory, "export.json")
 
 	chat := "@" + link.Username
-	if link.ChannelID != 0 {
+	if link.SavedAccountID != 0 {
+		chat = ""
+	} else if link.ChannelID != 0 {
 		chat = strconv.FormatInt(link.ChannelID, 10)
 	}
 	id := strconv.Itoa(link.MessageID)
@@ -263,6 +280,9 @@ func (p *tdlProvider) readTDLMedia(ctx context.Context, link MessageLink, refres
 		"chat", "export", "--chat", chat,
 		"--type", "id", "--input", id + "," + id,
 		"--all", "--raw", "--respect-restrictions", "--output", output,
+	}
+	if link.SavedAccountID != 0 {
+		args = append(args, "--saved-owner", strconv.FormatInt(link.SavedAccountID, 10))
 	}
 	if err := p.runTDLExport(ctx, args); err != nil {
 		if !refreshPeer || link.ChannelID == 0 || transferFailure(err).Code != "access_denied" {
@@ -369,7 +389,7 @@ func (p *tdlProvider) Download(
 	if err != nil {
 		return err
 	}
-	if after.channelID != verified.channelID || !sameTelegramAttachment(expected, after.media) {
+	if after.peerID != verified.peerID || after.saved != verified.saved || !sameTelegramAttachment(expected, after.media) {
 		return &Failure{Code: "media_changed"}
 	}
 	if err := ctx.Err(); err != nil {
@@ -390,15 +410,18 @@ func (p *tdlProvider) runTDLTransfer(
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 
-	// The numeric URL is pinned to the inspected channel. The template
-	// admits only the exact peer/message and the filename yielded by export.
-	url := fmt.Sprintf("https://t.me/c/%d/%d", record.channelID, record.messageID)
+	// The template admits only the inspected peer, message and filename.
 	template := fmt.Sprintf(
 		"{{if and (eq .DialogID %d) (eq .MessageID %d) (eq .FileName %s)}}%s{{else}}unexpected{{end}}",
-		record.channelID, record.messageID, strconv.Quote(record.file), tdlTransferName,
+		record.peerID, record.messageID, strconv.Quote(record.file), tdlTransferName,
 	)
-	cmd := p.tdlCommand(ctx, "download", "--url", url, "--dir", directory,
-		"--template", template, "--restart", "--disable-progress-ps")
+	args := []string{"download", "--dir", directory, "--template", template, "--restart", "--disable-progress-ps"}
+	if record.saved {
+		args = append(args, "--saved-owner", strconv.FormatInt(record.peerID, 10), "--saved-message", strconv.Itoa(record.messageID))
+	} else {
+		args = append(args, "--url", fmt.Sprintf("https://t.me/c/%d/%d", record.peerID, record.messageID))
+	}
+	cmd := p.tdlCommand(ctx, args...)
 	var output tdlMediaOutput
 	cmd.Stdout = &output
 	cmd.Stderr = &output

@@ -10,9 +10,10 @@ Browse Telegram channels, preview videos, and batch-download attachments to a fo
 
 - Paste a Telegram message link to download a video, image, audio file, or document.
 - Open **Channel files**, pick a subscribed channel or paste a public channel link, and browse a date range. Filter by file type and queue several attachments at once.
+- Forward files to Telegram **Saved Messages** on your phone, then open **Saved Messages** in NestFetch to browse, preview videos, and queue the attachments you want.
 - Preview a video before saving. The player shows buffering progress and Telegram transfer speed, and lets you jump to another part of the video.
 - Play finished videos from the **Completed** list, including offline playback from local storage.
-- Open a download's details to see its Telegram link and save location. Hide completed entries, restore them later, or cancel a download from the same panel.
+- Open a download's details to see its source and save location. Hide completed entries, restore them later, or cancel a download from the same panel.
 - Save to a local folder or a mounted network volume. Pause, retry, or choose a new destination from the download queue.
 
 The interface supports English and Simplified Chinese in light, dark, and system appearance.

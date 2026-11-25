@@ -57,18 +57,32 @@ func (p *telegramProvider) ListAttachments(parent context.Context, filter channe
 	defer cleanup()
 
 	var link MessageLink
-	if username, ok := strings.CutPrefix(filter.Channel, "@"); ok {
-		link.Username = username
+	var channel *tg.InputChannel
+	var source string
+	var peer tg.InputPeerClass
+	if filter.Saved {
+		self, err := client.Self(ctx)
+		if err != nil {
+			return channelPage{}, telegramOperationError(ctx, err)
+		}
+		if self.ID <= 0 {
+			return channelPage{}, telegramFailure("telegram_error")
+		}
+		link.SavedAccountID = self.ID
+		peer = &tg.InputPeerSelf{}
 	} else {
-		link.ChannelID, _ = positiveID(filter.Channel, 64)
+		if username, ok := strings.CutPrefix(filter.Channel, "@"); ok {
+			link.Username = username
+		} else {
+			link.ChannelID, _ = positiveID(filter.Channel, 64)
+		}
+		channel, source, err = resolveTelegramChannel(ctx, client.API(), link)
+		if err != nil {
+			return channelPage{}, telegramOperationError(ctx, err)
+		}
+		peer = &tg.InputPeerChannel{ChannelID: channel.ChannelID, AccessHash: channel.AccessHash}
 	}
-	channel, source, err := resolveTelegramChannel(ctx, client.API(), link)
-	if err != nil {
-		return channelPage{}, telegramOperationError(ctx, err)
-	}
-	history := query.NewQuery(client.API()).Messages().GetHistory(&tg.InputPeerChannel{
-		ChannelID: channel.ChannelID, AccessHash: channel.AccessHash,
-	})
+	history := query.NewQuery(client.API()).Messages().GetHistory(peer)
 	iter := history.BatchSize(100).Iter()
 	if filter.Before != 0 {
 		iter.OffsetID(filter.Before)
@@ -80,12 +94,14 @@ func (p *telegramProvider) ListAttachments(parent context.Context, filter channe
 	scanned, lastID := 0, 0
 	for iter.Next(ctx) {
 		item := iter.Value()
-		if c := item.Entities.Channels()[channel.ChannelID]; c != nil {
-			if c.Noforwards {
-				return channelPage{}, telegramFailure("protected_media")
-			}
-			if link.Username == "" {
-				link.Username = c.Username
+		if channel != nil {
+			if c := item.Entities.Channels()[channel.ChannelID]; c != nil {
+				if c.Noforwards {
+					return channelPage{}, telegramFailure("protected_media")
+				}
+				if link.Username == "" {
+					link.Username = c.Username
+				}
 			}
 		}
 		if item.Msg.GetDate() < filter.From {
@@ -105,8 +121,7 @@ func (p *telegramProvider) ListAttachments(parent context.Context, filter channe
 		if !ok || msg.Date > filter.To {
 			continue
 		}
-		peer, ok := msg.PeerID.(*tg.PeerChannel)
-		if !ok || peer.ChannelID != channel.ChannelID {
+		if !telegramAttachmentPeer(msg.PeerID, channel, link.SavedAccountID) {
 			continue
 		}
 		attachment, err := telegramMediaFromMessage(msg, channel, source)
@@ -114,7 +129,13 @@ func (p *telegramProvider) ListAttachments(parent context.Context, filter channe
 			continue
 		}
 		attachment.media.Thumbnail = inlineTelegramCover(attachment)
-		page.Items = append(page.Items, browsedAttachment(channelMessageURL(channel.ChannelID, link.Username, id), attachment.media, msg.Date))
+		var url string
+		if filter.Saved {
+			url = savedMessageLink(link.SavedAccountID, id)
+		} else {
+			url = channelMessageURL(channel.ChannelID, link.Username, id)
+		}
+		page.Items = append(page.Items, browsedAttachment(url, attachment.media, msg.Date))
 	}
 	if err := iter.Err(); err != nil {
 		return channelPage{}, telegramOperationError(ctx, err)

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
-import { ArrowDownToLine, ChevronDown, ChevronRight, CircleCheck, Folder, Layers, Library, Link2, Monitor, Moon, Play, Send, Settings, Sun, X } from 'lucide-react';
+import { ArrowDownToLine, Bookmark, ChevronDown, ChevronRight, CircleCheck, Folder, Layers, Library, Link2, Monitor, Moon, Play, Send, Settings, Sun, X } from 'lucide-react';
 import { AccountDialog } from './AccountDialog';
 import { ChannelAttachments } from './ChannelAttachments';
 import { countByView, Downloads } from './Downloads';
@@ -27,7 +27,7 @@ const filters = [
 ] as const;
 const signingIn = new Set<Account['state']>(['starting', 'qr', 'password']);
 const running = new Set<Job['state']>(['queued', 'resolving', 'downloading', 'saving']);
-type WorkspaceView = View | 'channels';
+type WorkspaceView = View | 'channels' | 'saved';
 
 interface Preferences {
   language: Language;
@@ -174,6 +174,9 @@ function Sidebar({ view, jobs, account, t, onView, onAccount }: SidebarProps) {
         <button className="nav-item channel-nav" type="button" aria-pressed={view === 'channels'} onClick={() => onView('channels')}>
           <Library aria-hidden="true" /><span>{t('channelAttachments')}</span>
         </button>
+        <button className="nav-item" type="button" aria-pressed={view === 'saved'} onClick={() => onView('saved')}>
+          <Bookmark aria-hidden="true" /><span>{t('savedMessages')}</span>
+        </button>
       </nav>
       <button className="account-button" type="button" aria-label={t('account')} aria-haspopup="dialog" disabled={!account} onClick={onAccount}>
         <span className="account-icon"><Send aria-hidden="true" /></span>
@@ -193,6 +196,7 @@ export function App() {
   const t = translator(preferences.language);
   const { snapshot, failure: engineFailure, refresh } = useEngine();
   const [view, setView] = useState<WorkspaceView>('all');
+  const browsingAttachments = view === 'channels' || view === 'saved';
   const [link, setLink] = useState('');
   const [busy, setBusy] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
@@ -304,7 +308,7 @@ export function App() {
     let issue: Failure | undefined;
     const succeeded = await run(async () => { await request('enqueue', { url }); }, failure => { issue = failure; });
     if (!succeeded) return issue ?? { code: 'busy' };
-    if (view !== 'channels') {
+    if (!browsingAttachments) {
       setView('all');
       setLink(current => current.trim() === url ? '' : current);
     }
@@ -352,7 +356,7 @@ export function App() {
   const leaf = folder?.replace(/[/\\]+$/, '').split(/[/\\]/).pop();
   const folderName = leaf === 'Downloads' ? t('defaultFolder') : leaf || folder || t('defaultFolder');
   const displayedError = engineFailure || appError;
-  const heading = t(view === 'channels' ? 'channelAttachments' : view === 'all' ? 'downloads' : view);
+  const heading = t(view === 'channels' ? 'channelAttachments' : view === 'saved' ? 'savedMessages' : view === 'all' ? 'downloads' : view);
   const destination = (
     <button type="button" className="destination" title={folder || t('chooseFolder')} disabled={busy || !snapshot} onClick={() => { void setFolder(); }}>
       <Folder aria-hidden="true" /><span>{t('saveTo')}</span><b>{folderName}</b><ChevronDown aria-hidden="true" />
@@ -393,7 +397,7 @@ export function App() {
         </header>
         <div className="workspace-content">
           <h1>{heading}</h1>
-          {view !== 'channels' && <form className="composer-form" onSubmit={addDownload} noValidate>
+          {!browsingAttachments && <form className="composer-form" onSubmit={addDownload} noValidate>
             <div className="composer" data-invalid={linkError?.code === 'invalid_link'}>
               <Link2 aria-hidden="true" />
               <input
@@ -436,13 +440,14 @@ export function App() {
               <button className="secondary-button" type="button" aria-haspopup="dialog" onClick={openAccount}>{t(account.state === 'error' ? 'reconnect' : needsSetup ? 'configure' : 'scan')}</button>
             </div>
           )}
-          {view === 'channels'
+          {browsingAttachments
             ? account?.state === 'connected' && <ChannelAttachments
+              key={`${view}:${account.backend ?? ''}:${account.label ?? ''}`} saved={view === 'saved'}
               t={t} language={preferences.language} busy={busy} destination={destination} notification={notification} onPreview={openPreview} onQueue={addBatch} />
             : <Downloads jobs={jobs} view={view} loading={!snapshot && !engineFailure} busy={busy} language={preferences.language} t={t} connected={account?.state === 'connected'} resumeRestarts={account?.backend === 'tdl'} onAction={onJobAction} onPlay={playDownload} />}
         </div>
       </main>
-      {view !== 'channels' && <div className="notifications" role="status" aria-live="polite">
+      {!browsingAttachments && <div className="notifications" role="status" aria-live="polite">
         {notification && <span>{notification}</span>}
       </div>}
       {settingsOpen && <SettingsDialog proxy={snapshot?.settings.proxy} t={t} language={preferences.language}

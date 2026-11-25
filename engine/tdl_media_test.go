@@ -61,7 +61,7 @@ func TestTDLRawArchivePinsExactMessageAndVideo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if record.channelID != tdlFixtureChannel || record.messageID != tdlFixtureMessage ||
+	if record.peerID != tdlFixtureChannel || record.messageID != tdlFixtureMessage ||
 		record.media.ID != tdlFixtureDocument || record.media.Name != "Clip #1.mp4" ||
 		record.media.Duration != 5 || record.media.Bytes != int64(len(tdlFixtureBytes)) {
 		t.Fatalf("invalid parsed metadata: %+v", record)
@@ -86,6 +86,24 @@ func TestTDLRawArchivePinsExactMessageAndVideo(t *testing.T) {
 	if err != nil || audio.media.Kind != MediaAudio || audio.media.Name != "audio.mp3" || audio.media.Duration != 5 {
 		t.Fatalf("audio metadata mismatch: %+v %v", audio.media, err)
 	}
+}
+
+func TestTDLSavedArchivePinsBothOwnerAndPeerType(t *testing.T) {
+	link := MessageLink{SavedAccountID: tdlFixtureChannel, MessageID: tdlFixtureMessage}
+	raw := tdlVideoMessage()
+	archive := func(owner int64) []byte {
+		return encodeTestTDL(t, owner, tdlFixtureMessage, "Clip #1.mp4", raw)
+	}
+	_, err := decodeTDLArchive(archive(tdlFixtureChannel), link)
+	expectCode(t, err, "message_not_found")
+
+	raw.PeerID = &tg.PeerUser{UserID: tdlFixtureChannel}
+	record, err := decodeTDLArchive(archive(tdlFixtureChannel), link)
+	if err != nil || !record.saved || record.peerID != tdlFixtureChannel || record.media.ID != tdlFixtureDocument {
+		t.Fatalf("expected authenticated Saved Messages attachment: %+v, %v", record, err)
+	}
+	_, err = decodeTDLArchive(archive(tdlFixtureChannel+1), link)
+	expectCode(t, err, "saved_account_mismatch")
 }
 
 func TestTDLCoverAndProtection(t *testing.T) {

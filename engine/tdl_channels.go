@@ -58,7 +58,7 @@ func (p *tdlProvider) ListAttachments(ctx context.Context, query channelQuery) (
 		"--raw", "--respect-restrictions", "--output",
 	}
 	data, err := p.catalogExport(ctx, 16*1024*1024, args...)
-	if transferFailure(err).Code == "access_denied" && !strings.HasPrefix(query.Channel, "@") {
+	if !query.Saved && transferFailure(err).Code == "access_denied" && !strings.HasPrefix(query.Channel, "@") {
 		// Refresh the peer cache for a private channel pasted from Telegram.
 		if _, refreshErr := p.ListChannels(ctx); refreshErr != nil {
 			return channelPage{}, refreshErr
@@ -111,6 +111,9 @@ func decodeTDLChannelPage(data []byte, query channelQuery) (channelPage, error) 
 	}
 	page := channelPage{Items: make([]channelAttachment, 0, len(archive.Messages)), NextBefore: archive.NextBefore}
 	source := telegramDisplayText(archive.Title)
+	if query.Saved {
+		source = ""
+	}
 	seen := make(map[int]bool, len(archive.Messages))
 	for _, item := range archive.Messages {
 		if item.ID <= 0 || item.ID > math.MaxInt32 || seen[item.ID] || item.Raw == nil ||
@@ -118,12 +121,16 @@ func decodeTDLChannelPage(data []byte, query channelQuery) (channelPage, error) 
 			item.Raw.Date < query.From || item.Raw.Date > query.To {
 			continue
 		}
-		record, err := decodeTDLMessage(item, archive.ID, source)
+		record, err := decodeTDLMessage(item, archive.ID, query.Saved, source)
 		if err != nil {
 			continue
 		}
 		seen[item.ID] = true
-		page.Items = append(page.Items, browsedAttachment(channelMessageURL(archive.ID, username, item.ID), record.media, item.Raw.Date))
+		link := channelMessageURL(archive.ID, username, item.ID)
+		if query.Saved {
+			link = savedMessageLink(archive.ID, item.ID)
+		}
+		page.Items = append(page.Items, browsedAttachment(link, record.media, item.Raw.Date))
 	}
 	return page, nil
 }

@@ -43,3 +43,31 @@ func TestTopicHint(t *testing.T) {
 		}
 	}
 }
+
+func TestSavedMessageReference(t *testing.T) {
+	const accountID = int64(9007199254740993)
+	link, err := parseMessageLink(" nestfetch://saved/9007199254740993/042 ")
+	if err != nil || link.SavedAccountID != accountID || link.MessageID != 42 ||
+		link.ChannelID != 0 || link.Username != "" || link.TopicID != 0 || link.URL != savedMessageLink(accountID, 42) {
+		t.Fatalf("saved reference parsed as %+v, %v", link, err)
+	}
+	_, err = parseChannelSelector(link.URL)
+	expectCode(t, err, "invalid_channel")
+
+	for _, raw := range []string{
+		"nestfetch://saved/2", "nestfetch://saved/0/42", "nestfetch://saved/2/0",
+		"nestfetch://saved/9223372036854775808/42", "nestfetch://saved/2/2147483648",
+		"nestfetch://saved/2/%34%32", "nestfetch://saved/2/42?single",
+		"nestfetch://saved/2/42/11", "nestfetch://saved/2/42#fragment",
+	} {
+		_, err := parseMessageLink(raw)
+		expectCode(t, err, "invalid_link")
+	}
+
+	query := channelQuery{Saved: true, From: 1, To: 100}
+	if err := query.validate(); err != nil {
+		t.Fatal(err)
+	}
+	query.Channel = "some_channel"
+	expectCode(t, query.validate(), "invalid_channel")
+}

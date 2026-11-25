@@ -44,9 +44,13 @@ func (p *tdlProvider) Preview(parent context.Context, link MessageLink,
 
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
-	cmd := p.tdlCommand(ctx, "nestfetch-preview", "--",
-		strconv.FormatInt(record.channelID, 10), strconv.Itoa(record.messageID),
-		strconv.FormatInt(record.media.ID, 10), strconv.FormatInt(record.media.Bytes, 10))
+	args := []string{"nestfetch-preview"}
+	if record.saved {
+		args = append(args, "--saved")
+	}
+	cmd := p.tdlCommand(ctx, append(args, "--",
+		strconv.FormatInt(record.peerID, 10), strconv.Itoa(record.messageID),
+		strconv.FormatInt(record.media.ID, 10), strconv.FormatInt(record.media.Bytes, 10))...)
 	input, err := cmd.StdinPipe()
 	if err != nil {
 		return telegramFailure("preview_unavailable")

@@ -1,0 +1,419 @@
+diff --git a/app/chat/export.go b/app/chat/export.go
+index 49d4345..a1d73c3 100644
+--- a/app/chat/export.go
++++ b/app/chat/export.go
+@@ -41,6 +41,7 @@ type ExportOptions struct {
+ 	PageSize            int
+ 	BeforeID            int
+ 	RespectRestrictions bool
++	SavedOwner          int64
+ }
+ 
+ type Message struct {
+@@ -78,7 +79,10 @@ func Export(ctx context.Context, c *telegram.Client, kvd storage.Storage, opts E
+ 	var peer peers.Peer
+ 
+ 	manager := peers.Options{Storage: storage.NewPeers(kvd)}.Build(c.API())
+-	if opts.Chat == "" { // defaults to me(saved messages)
++	saved := opts.RespectRestrictions && opts.Chat == "" && opts.Thread == 0
++	if saved {
++		peer, err = tutil.NestFetchSavedPeer(ctx, manager, opts.SavedOwner)
++	} else if opts.Chat == "" { // defaults to me(saved messages)
+ 		peer, err = manager.Self(ctx)
+ 	} else {
+ 		peer, err = tutil.GetInputPeer(ctx, manager, opts.Chat)
+@@ -87,7 +91,7 @@ func Export(ctx context.Context, c *telegram.Client, kvd storage.Storage, opts E
+ 		return fmt.Errorf("failed to get peer: %w", err)
+ 	}
+ 	channel, isChannel := peer.(peers.Channel)
+-	if opts.RespectRestrictions {
++	if opts.RespectRestrictions && !saved {
+ 		if !isChannel {
+ 			return fmt.Errorf("PEER_ID_INVALID")
+ 		}
+@@ -216,6 +220,9 @@ loop:
+ 		if !ok {
+ 			continue
+ 		}
++		if saved && !tutil.NestFetchSavedMessageMatches(m, id) {
++			continue
++		}
+ 		// only get media messages
+ 		media, ok := tmedia.GetMedia(m)
+ 		if !ok && !opts.All {
+diff --git a/app/dl/dl.go b/app/dl/dl.go
+index 5200274..a6f18bd 100644
+--- a/app/dl/dl.go
++++ b/app/dl/dl.go
+@@ -19,6 +19,7 @@ import (
+ 	"github.com/iyear/tdl/core/logctx"
+ 	"github.com/iyear/tdl/core/storage"
+ 	"github.com/iyear/tdl/core/tclient"
++	"github.com/iyear/tdl/core/util/tutil"
+ 	"github.com/iyear/tdl/pkg/consts"
+ 	"github.com/iyear/tdl/pkg/key"
+ 	"github.com/iyear/tdl/pkg/prog"
+@@ -39,6 +40,9 @@ type Options struct {
+ 	Takeout    bool
+ 	Group      bool // auto detect grouped message
+ 
++	SavedOwner   int64
++	SavedMessage int
++
+ 	// resume opts
+ 	Continue, Restart bool
+ 
+@@ -58,13 +62,24 @@ func Run(ctx context.Context, c *telegram.Client, kvd storage.Storage, opts Opti
+ 		tclient.NewDefaultMiddlewares(ctx, viper.GetDuration(consts.FlagReconnectTimeout))...)
+ 	defer multierr.AppendInvoke(&rerr, multierr.Close(pool))
+ 
+-	parsers := []parser{
+-		{Data: opts.URLs, Parser: tmessage.FromURL(ctx, pool, kvd, opts.URLs)},
+-		{Data: opts.Files, Parser: tmessage.FromFile(ctx, pool, kvd, opts.Files, true)},
+-	}
+-	dialogs, err := collectDialogs(parsers)
+-	if err != nil {
+-		return err
++	manager := peers.Options{Storage: storage.NewPeers(kvd)}.Build(pool.Default(ctx))
++	var dialogs [][]*tmessage.Dialog
++	if opts.SavedOwner != 0 {
++		self, err := tutil.NestFetchSavedPeer(ctx, manager, opts.SavedOwner)
++		if err != nil {
++			return err
++		}
++		dialogs = [][]*tmessage.Dialog{{{Peer: self.InputPeer(), Messages: []int{opts.SavedMessage}}}}
++	} else {
++		parsers := []parser{
++			{Data: opts.URLs, Parser: tmessage.FromURL(ctx, pool, kvd, opts.URLs)},
++			{Data: opts.Files, Parser: tmessage.FromFile(ctx, pool, kvd, opts.Files, true)},
++		}
++		var err error
++		dialogs, err = collectDialogs(parsers)
++		if err != nil {
++			return err
++		}
+ 	}
+ 	logctx.From(ctx).Debug("Collect dialogs",
+ 		zap.Any("dialogs", dialogs))
+@@ -73,8 +88,6 @@ func Run(ctx context.Context, c *telegram.Client, kvd storage.Storage, opts Opti
+ 		return serve(ctx, kvd, pool, dialogs, opts.Port, opts.Takeout)
+ 	}
+ 
+-	manager := peers.Options{Storage: storage.NewPeers(kvd)}.Build(pool.Default(ctx))
+-
+ 	it, err := newIter(pool, manager, dialogs, opts, viper.GetDuration(consts.FlagDelay))
+ 	if err != nil {
+ 		return err
+diff --git a/app/dl/iter.go b/app/dl/iter.go
+index 174307d..3243360 100644
+--- a/app/dl/iter.go
++++ b/app/dl/iter.go
+@@ -191,6 +191,21 @@ func (i *iter) process(ctx context.Context) (ret bool, skip bool) {
+ 		return false, false
+ 	}
+ 
++	if i.opts.SavedOwner != 0 {
++		if from.ID() != i.opts.SavedOwner {
++			i.err = tutil.ErrNestFetchSavedAccountMismatch
++			return false, false
++		}
++		if !tutil.NestFetchSavedMessageMatches(message, i.opts.SavedOwner) || message.ID != msg {
++			i.err = errors.New("MESSAGE_ID_INVALID")
++			return false, false
++		}
++		if tutil.NestFetchSavedMediaProtected(message) {
++			i.err = errors.New("CHAT_FORWARDS_RESTRICTED")
++			return false, false
++		}
++	}
++
+ 	if _, ok := message.GetGroupedID(); ok && i.opts.Group {
+ 		return i.processGrouped(ctx, message, from, startLogicalPos)
+ 	}
+diff --git a/app/dl/nestfetch_preview.go b/app/dl/nestfetch_preview.go
+index e396606..f0ef91c 100644
+--- a/app/dl/nestfetch_preview.go
++++ b/app/dl/nestfetch_preview.go
+@@ -17,6 +17,7 @@ import (
+ 	"github.com/gotd/td/tg"
+ 
+ 	"github.com/iyear/tdl/core/storage"
++	"github.com/iyear/tdl/core/util/tutil"
+ 	preview "github.com/iyear/tdl/internal/nestfetchpreview"
+ )
+ 
+@@ -28,22 +29,46 @@ var (
+ 
+ // NestFetchPreview exposes only the inspected video and holds no media on disk.
+ func NestFetchPreview(ctx context.Context, client *telegram.Client, kvd storage.Storage,
+-	channelID int64, messageID int, documentID, size int64, status io.Writer) error {
++	peerID int64, messageID int, documentID, size int64, saved bool, status io.Writer) error {
+ 	api := client.API()
+ 	manager := peers.Options{Storage: storage.NewPeers(kvd)}.Build(api)
+ 
+ 	lookup, cancel := context.WithTimeout(ctx, 20*time.Second)
+ 	defer cancel()
+-	channel, err := manager.ResolveChannelID(lookup, channelID)
+-	if err != nil {
+-		return err
+-	}
+-	if channel.Raw().Noforwards {
+-		return errPreviewProtected
++	var loadDocument func(context.Context) (*tg.Document, string, error)
++	if saved {
++		self, err := tutil.NestFetchSavedPeer(lookup, manager, peerID)
++		if err != nil {
++			return err
++		}
++		loadDocument = func(ctx context.Context) (*tg.Document, string, error) {
++			msg, err := tutil.GetSingleMessage(ctx, api, self.InputPeer(), messageID)
++			if errors.Is(err, tutil.ErrMessageDeleted) {
++				return nil, "", errPreviewChanged
++			}
++			if err != nil {
++				return nil, "", err
++			}
++			if !tutil.NestFetchSavedMessageMatches(msg, peerID) || msg.ID != messageID {
++				return nil, "", errPreviewChanged
++			}
++			return previewDocument(msg, documentID, size)
++		}
++	} else {
++		channel, err := manager.ResolveChannelID(lookup, peerID)
++		if err != nil {
++			return err
++		}
++		if channel.Raw().Noforwards {
++			return errPreviewProtected
++		}
++		input := channel.Raw().AsInput()
++		loadDocument = func(ctx context.Context) (*tg.Document, string, error) {
++			return lookupPreviewVideo(ctx, api, input, messageID, documentID, size)
++		}
+ 	}
+-	input := channel.Raw().AsInput()
+ 	refresh := func(ctx context.Context) (partio.ChunkSource, string, error) {
+-		doc, contentType, err := lookupPreviewVideo(ctx, api, input, messageID, documentID, size)
++		doc, contentType, err := loadDocument(ctx)
+ 		if err != nil {
+ 			return nil, "", err
+ 		}
+diff --git a/cmd/chat.go b/cmd/chat.go
+index ce71dac..d404666 100644
+--- a/cmd/chat.go
++++ b/cmd/chat.go
+@@ -90,6 +90,10 @@ func NewChatExport() *cobra.Command {
+ 				(opts.PageSize > 0 && opts.Type != chat.ExportTypeTime) {
+ 				return fmt.Errorf("invalid export page")
+ 			}
++			if opts.SavedOwner < 0 || (opts.SavedOwner != 0 &&
++				(!opts.RespectRestrictions || opts.Chat != "" || opts.Thread != 0)) {
++				return fmt.Errorf("invalid saved messages export")
++			}
+ 			return tRun(cmd.Context(), func(ctx context.Context, c *telegram.Client, kvd storage.Storage) error {
+ 				return chat.Export(logctx.Named(ctx, "export"), c, kvd, opts)
+ 			}, limiter)
+@@ -118,6 +122,8 @@ func NewChatExport() *cobra.Command {
+ 	cmd.Flags().IntVar(&opts.PageSize, "page-size", 0, "maximum messages in a time export page, zero uses the full range")
+ 	cmd.Flags().IntVar(&opts.BeforeID, "before-id", 0, "continue a time export before this message ID")
+ 	cmd.Flags().BoolVar(&opts.RespectRestrictions, "respect-restrictions", false, "reject channels with content protection")
++	cmd.Flags().Int64Var(&opts.SavedOwner, "saved-owner", 0, "expected authenticated Saved Messages owner")
++	_ = cmd.Flags().MarkHidden("saved-owner")
+ 
+ 	// completion and validation
+ 	_ = cmd.RegisterFlagCompletionFunc(input, func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+diff --git a/cmd/dl.go b/cmd/dl.go
+index 6540ee8..0360d07 100644
+--- a/cmd/dl.go
++++ b/cmd/dl.go
+@@ -23,7 +23,12 @@ func NewDownload() *cobra.Command {
+ 		Short:   "Download anything from Telegram (protected) chat",
+ 		GroupID: groupTools.ID,
+ 		RunE: func(cmd *cobra.Command, args []string) error {
+-			if len(opts.URLs) == 0 && len(opts.Files) == 0 {
++			if opts.SavedOwner != 0 || opts.SavedMessage != 0 {
++				if opts.SavedOwner <= 0 || opts.SavedMessage <= 0 || opts.SavedMessage > 1<<31-1 ||
++					len(opts.URLs) != 0 || len(opts.Files) != 0 || opts.Group || opts.Serve || opts.Takeout {
++					return fmt.Errorf("invalid saved messages download")
++				}
++			} else if len(opts.URLs) == 0 && len(opts.Files) == 0 {
+ 				return fmt.Errorf("no urls or files provided")
+ 			}
+ 
+@@ -46,6 +51,10 @@ func NewDownload() *cobra.Command {
+ 
+ 	cmd.Flags().StringSliceVarP(&opts.URLs, "url", "u", []string{}, "telegram message links")
+ 	cmd.Flags().StringSliceVarP(&opts.Files, file, "f", []string{}, "official client exported files")
++	cmd.Flags().Int64Var(&opts.SavedOwner, "saved-owner", 0, "expected authenticated Saved Messages owner")
++	cmd.Flags().IntVar(&opts.SavedMessage, "saved-message", 0, "message ID in Saved Messages")
++	_ = cmd.Flags().MarkHidden("saved-owner")
++	_ = cmd.Flags().MarkHidden("saved-message")
+ 
+ 	cmd.Flags().String(consts.FlagDlTemplate, `{{ .DialogID }}_{{ .MessageID }}_{{ filenamify .FileName }}`, "download file name template")
+ 
+diff --git a/cmd/nestfetch_preview.go b/cmd/nestfetch_preview.go
+index 79f5bfa..ff6878b 100644
+--- a/cmd/nestfetch_preview.go
++++ b/cmd/nestfetch_preview.go
+@@ -14,17 +14,18 @@ import (
+ )
+ 
+ func newNestFetchPreview() *cobra.Command {
+-	return &cobra.Command{
+-		Use:    "nestfetch-preview CHANNEL MESSAGE DOCUMENT SIZE",
++	var saved bool
++	cmd := &cobra.Command{
++		Use:    "nestfetch-preview PEER MESSAGE DOCUMENT SIZE",
+ 		Hidden: true,
+ 		Args:   cobra.ExactArgs(4),
+ 		RunE: func(cmd *cobra.Command, args []string) error {
+-			channel, err1 := strconv.ParseInt(args[0], 10, 64)
++			peer, err1 := strconv.ParseInt(args[0], 10, 64)
+ 			message, err2 := strconv.ParseInt(args[1], 10, 32)
+ 			document, err3 := strconv.ParseInt(args[2], 10, 64)
+ 			size, err4 := strconv.ParseInt(args[3], 10, 64)
+ 			if err1 != nil || err2 != nil || err3 != nil || err4 != nil ||
+-				channel <= 0 || message <= 0 || document == 0 || size <= 0 {
++				peer <= 0 || message <= 0 || document == 0 || size <= 0 {
+ 				return fmt.Errorf("invalid preview request")
+ 			}
+ 
+@@ -36,8 +37,10 @@ func newNestFetchPreview() *cobra.Command {
+ 				cancel()
+ 			}()
+ 			return tRun(ctx, func(ctx context.Context, client *telegram.Client, kvd storage.Storage) error {
+-				return dl.NestFetchPreview(ctx, client, kvd, channel, int(message), document, size, cmd.OutOrStdout())
++				return dl.NestFetchPreview(ctx, client, kvd, peer, int(message), document, size, saved, cmd.OutOrStdout())
+ 			})
+ 		},
+ 	}
++	cmd.Flags().BoolVar(&saved, "saved", false, "stream from the authenticated account's Saved Messages")
++	return cmd
+ }
+diff --git a/core/util/tutil/nestfetch_saved.go b/core/util/tutil/nestfetch_saved.go
+new file mode 100644
+index 0000000..8875b94
+--- /dev/null
++++ b/core/util/tutil/nestfetch_saved.go
+@@ -0,0 +1,51 @@
++package tutil
++
++import (
++	"context"
++	"errors"
++
++	"github.com/gotd/td/telegram/peers"
++	"github.com/gotd/td/tg"
++)
++
++var ErrNestFetchSavedAccountMismatch = errors.New("NESTFETCH_SAVED_ACCOUNT_MISMATCH")
++
++// NestFetchSavedPeer resolves the current session's personal Saved Messages.
++// An expected owner of zero is used only when listing them.
++func NestFetchSavedPeer(ctx context.Context, manager *peers.Manager, owner int64) (peers.User, error) {
++	self, err := manager.Self(ctx)
++	if err != nil {
++		return peers.User{}, err
++	}
++	if self.ID() <= 0 || !self.Self() {
++		return peers.User{}, errors.New("PEER_ID_INVALID")
++	}
++	if owner != 0 && self.ID() != owner {
++		return peers.User{}, ErrNestFetchSavedAccountMismatch
++	}
++	return self, nil
++}
++
++func NestFetchSavedMessageMatches(msg *tg.Message, owner int64) bool {
++	if msg == nil {
++		return false
++	}
++	peer, ok := msg.PeerID.(*tg.PeerUser)
++	return ok && peer.UserID == owner
++}
++
++func NestFetchSavedMediaProtected(msg *tg.Message) bool {
++	if _, timed := msg.GetTTLPeriod(); msg.Noforwards || timed || msg.TTLPeriod != 0 {
++		return true
++	}
++	switch media := msg.Media.(type) {
++	case *tg.MessageMediaDocument:
++		_, timed := media.GetTTLSeconds()
++		return timed || media.TTLSeconds != 0
++	case *tg.MessageMediaPhoto:
++		_, timed := media.GetTTLSeconds()
++		return timed || media.TTLSeconds != 0
++	default:
++		return false
++	}
++}
+diff --git a/core/util/tutil/nestfetch_saved_test.go b/core/util/tutil/nestfetch_saved_test.go
+new file mode 100644
+index 0000000..c410929
+--- /dev/null
++++ b/core/util/tutil/nestfetch_saved_test.go
+@@ -0,0 +1,64 @@
++package tutil
++
++import (
++	"context"
++	"errors"
++	"testing"
++
++	"github.com/gotd/td/telegram/peers"
++	"github.com/gotd/td/tg"
++	"github.com/gotd/td/tgmock"
++)
++
++func TestNestFetchSavedPeerPinsTheAuthenticatedAccount(t *testing.T) {
++	const owner = 456789
++	for _, tc := range []struct {
++		name string
++		want int64
++		err  error
++	}{
++		{name: "list", want: 0},
++		{name: "matching owner", want: owner},
++		{name: "account switched", want: owner + 1, err: ErrNestFetchSavedAccountMismatch},
++	} {
++		t.Run(tc.name, func(t *testing.T) {
++			mock := tgmock.New(t)
++			mock.ExpectCall(&tg.UsersGetUsersRequest{ID: []tg.InputUserClass{&tg.InputUserSelf{}}}).
++				ThenResult(&tg.UserClassVector{Elems: []tg.UserClass{&tg.User{ID: owner, Self: true}}})
++			manager := peers.Options{}.Build(tg.NewClient(mock))
++			user, err := NestFetchSavedPeer(context.Background(), manager, tc.want)
++			if !errors.Is(err, tc.err) {
++				t.Fatalf("owner resolution: %v, want %v", err, tc.err)
++			}
++			if err == nil {
++				if _, ok := user.InputPeer().(*tg.InputPeerSelf); !ok || user.ID() != owner {
++					t.Fatal("ownership check did not return the authenticated self peer")
++				}
++			}
++		})
++	}
++}
++
++func TestNestFetchSavedMessageRejectsOtherPeerTypesAndProtection(t *testing.T) {
++	const owner int64 = 456789
++	msg := &tg.Message{PeerID: &tg.PeerChannel{ChannelID: owner}}
++	if NestFetchSavedMessageMatches(msg, owner) {
++		t.Fatal("accepted a channel with the same numeric ID")
++	}
++	msg.PeerID = &tg.PeerUser{UserID: owner}
++	if !NestFetchSavedMessageMatches(msg, owner) {
++		t.Fatal("rejected the authenticated user's message")
++	}
++	document := &tg.MessageMediaDocument{}
++	document.SetTTLSeconds(0)
++	msg.Media = document
++	if !NestFetchSavedMediaProtected(msg) {
++		t.Fatal("accepted document with a TTL flag")
++	}
++	photo := &tg.MessageMediaPhoto{}
++	photo.SetTTLSeconds(0)
++	msg.Media = photo
++	if !NestFetchSavedMediaProtected(msg) {
++		t.Fatal("accepted photo with a TTL flag")
++	}
++}

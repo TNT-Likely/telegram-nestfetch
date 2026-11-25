@@ -33,11 +33,12 @@ type Account struct {
 }
 
 type MessageLink struct {
-	URL       string
-	Username  string
-	ChannelID int64
-	MessageID int
-	TopicID   int
+	URL            string
+	Username       string
+	ChannelID      int64
+	MessageID      int
+	TopicID        int
+	SavedAccountID int64
 }
 
 type MediaKind string

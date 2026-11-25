@@ -92,6 +92,8 @@ func tdlCommandFailure(ctx context.Context, runErr error, output string) error {
 		return nil
 	}
 	switch {
+	case tdlIncludes(lower, "nestfetch_saved_account_mismatch"):
+		return telegramFailure("saved_account_mismatch")
 	case tdlIncludes(lower, "auth_token_expired", "auth_token_invalid", "auth_token_already_accepted"):
 		return telegramFailure("tdl_login_token_invalid")
 	case tdlIncludes(lower, "update_app_to_login"):

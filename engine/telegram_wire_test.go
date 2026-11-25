@@ -63,6 +63,12 @@ func TestTelegramWireLoginCoverAndResumedTransfer(t *testing.T) {
 	})
 	message := &tg.Message{ID: messageID, PeerID: &tg.PeerChannel{ChannelID: channelID}}
 	message.SetMedia(attachment)
+	saved := &tg.Message{ID: messageID, PeerID: &tg.PeerUser{UserID: user.ID}, Date: 100}
+	saved.SetMedia(attachment)
+	otherChat := *saved
+	otherChat.PeerID = &tg.PeerUser{UserID: user.ID + 1}
+	otherItem := otherChat
+	otherItem.ID++
 
 	dc := cluster.NewCluster(cluster.Options{})
 	dispatch := dc.Dispatch(2, "nestfetch-fixture")
@@ -89,6 +95,21 @@ func TestTelegramWireLoginCoverAndResumedTransfer(t *testing.T) {
 	})
 	dispatch.Result(tg.ChannelsGetMessagesRequestTypeID, &tg.MessagesMessages{
 		Messages: []tg.MessageClass{message}, Chats: []tg.ChatClass{channel},
+	})
+	dispatch.Result(tg.MessagesGetMessagesRequestTypeID, &tg.MessagesMessages{
+		Messages: []tg.MessageClass{&otherChat, saved}, Users: []tg.UserClass{user},
+	})
+	dispatch.HandleFunc(tg.MessagesGetHistoryRequestTypeID, func(server *tgtest.Server, req *tgtest.Request) error {
+		var request tg.MessagesGetHistoryRequest
+		if err := request.Decode(req.Buf); err != nil {
+			return err
+		}
+		if _, ok := request.Peer.(*tg.InputPeerSelf); !ok {
+			return server.SendErr(req, tgerr.New(400, "PEER_ID_INVALID"))
+		}
+		return server.SendResult(req, &tg.MessagesMessages{
+			Messages: []tg.MessageClass{&otherItem, saved}, Users: []tg.UserClass{user},
+		})
 	})
 	dispatch.HandleFunc(tg.MessagesGetDialogsRequestTypeID, func(server *tgtest.Server, req *tgtest.Request) error {
 		var request tg.MessagesGetDialogsRequest
@@ -211,6 +232,48 @@ func TestTelegramWireLoginCoverAndResumedTransfer(t *testing.T) {
 	if firstVideoOffset.Load() != telegramPartSize || finalProgress != int64(len(fileBytes)) {
 		t.Fatalf("incorrect resume or progress: first offset %d, final size %d", firstVideoOffset.Load(), finalProgress)
 	}
+
+	page, err := p.ListAttachments(ctx, channelQuery{Saved: true, From: 1, To: 150})
+	savedURL := savedMessageLink(user.ID, messageID)
+	if err != nil || len(page.Items) != 1 || page.Items[0].URL != savedURL || page.Items[0].Kind != MediaVideo {
+		t.Fatalf("saved attachment listing returned %+v, %v", page, err)
+	}
+	savedLink, err := parseMessageLink(savedURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	savedMedia, err := p.Inspect(ctx, savedLink)
+	if err != nil || !sameTelegramAttachment(savedMedia, media) {
+		t.Fatalf("could not inspect the saved video: %v", err)
+	}
+	foreignLink := savedLink
+	foreignLink.SavedAccountID++
+	_, err = p.Inspect(ctx, foreignLink)
+	expectCode(t, err, "saved_account_mismatch")
+	savedTarget := filepath.Join(temp, "saved.part")
+	if err := p.Download(ctx, savedLink, savedMedia, savedTarget, nil); err != nil {
+		t.Fatal(err)
+	}
+	got, err = os.ReadFile(savedTarget)
+	if err != nil || !bytes.Equal(got, fileBytes) {
+		t.Fatalf("saved download bytes differed from fixture: %v", err)
+	}
+
+	t.Run("channel preview", func(t *testing.T) { assertTelegramWirePreview(t, ctx, p, link, fileBytes) })
+	t.Run("saved preview", func(t *testing.T) { assertTelegramWirePreview(t, ctx, p, savedLink, fileBytes) })
+	p.Close()
+	start(true)
+	waitForTelegramAccount(t, ctx, p, func(a Account) bool { return a.State == "connected" })
+	if err := p.SignOut(ctx); err != nil || confirmed.Load() {
+		t.Fatalf("local fixture sign-out failed: %v", err)
+	}
+	if p.Status().State != "disconnected" || p.storage.exists() {
+		t.Fatal("sign-out left local authorization active")
+	}
+}
+
+func assertTelegramWirePreview(t *testing.T, ctx context.Context, p *telegramProvider, link MessageLink, fileBytes []byte) {
+	t.Helper()
 	previewCtx, endPreview := context.WithCancel(ctx)
 	defer endPreview()
 	ready := make(chan string, 1)
@@ -255,15 +318,6 @@ func TestTelegramWireLoginCoverAndResumedTransfer(t *testing.T) {
 	case <-previewDone:
 	case <-ctx.Done():
 		t.Fatal("preview remained open after cancellation")
-	}
-	p.Close()
-	start(true)
-	waitForTelegramAccount(t, ctx, p, func(a Account) bool { return a.State == "connected" })
-	if err := p.SignOut(ctx); err != nil || confirmed.Load() {
-		t.Fatalf("local fixture sign-out failed: %v", err)
-	}
-	if p.Status().State != "disconnected" || p.storage.exists() {
-		t.Fatal("sign-out left local authorization active")
 	}
 }
 

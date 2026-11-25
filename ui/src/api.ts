@@ -82,6 +82,7 @@ export interface AttachmentQuery {
   channel: string;
   from: number;
   to: number;
+  saved?: boolean;
 }
 
 export interface BatchResult {

@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "TG NestFetch",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "identifier": "com.tntlikely.tgnestfetch",
   "build": {
     "beforeDevCommand": "npm run build:engine && npm --prefix ui run dev",

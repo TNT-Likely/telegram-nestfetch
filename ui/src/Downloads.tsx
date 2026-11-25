@@ -16,6 +16,7 @@ export interface JobActionOptions {
 
 const transferable = new Set<Job['state']>(['resolving', 'downloading', 'saving']);
 const canPause = new Set<Job['state']>(['queued', 'resolving', 'downloading']);
+const savedMessagePrefix = 'nestfetch://saved/';
 
 export function countByView(jobs: Job[], view: View) {
   return jobs.filter(job => inView(job, view)).length;
@@ -84,6 +85,10 @@ function jobTitle(job: Job, t: Translate) {
   return job.title || job.name || t('telegramAttachment');
 }
 
+function jobSource(job: Job, t: Translate) {
+  return job.url.startsWith(savedMessagePrefix) ? t('savedMessages') : job.source;
+}
+
 function Status({ job, t }: Pick<JobProps, 'job' | 't'>) {
   return <span className="job-state"><i className="dot" />{t(job.state)}</span>;
 }
@@ -125,6 +130,7 @@ function FeaturedJob({ job, t, resumeRestarts, busy, onAction, onDetails }: JobP
   const { element, cover } = useCover(job.id, job.hasThumbnail);
   const seconds = duration(job.duration);
   const title = jobTitle(job, t);
+  const source = jobSource(job, t);
   const action = job.state === 'paused' ? 'resume' : canPause.has(job.state) ? 'pause' : null;
   const ActionIcon = action === 'resume' ? Play : Pause;
   return (
@@ -138,7 +144,7 @@ function FeaturedJob({ job, t, resumeRestarts, busy, onAction, onDetails }: JobP
         <div className="feature-caption">
           <div className="feature-label">
             <h2 id="featured-title" title={title}>{title}</h2>
-            {job.source && <span title={job.source}>{job.source}</span>}
+            {source && <span title={source}>{source}</span>}
           </div>
           <div className="feature-actions">
             {action && (
@@ -171,7 +177,7 @@ function DownloadRow({ job, t, language, connected, resumeRestarts, busy, onActi
       : job.transferDone && job.state !== 'completed' && job.state !== 'removing' ? t('stagedDescription')
         : !connected && job.state === 'queued' ? t('waitingForLogin')
           : job.state === 'paused' && resumeRestarts ? t('resumeRestarts')
-            : job.size > 0 ? filesize(job.size) : job.source;
+            : job.size > 0 ? filesize(job.size) : jobSource(job, t);
   return (
     <li className="download-row" data-state={job.state}>
       <div className="thumb" ref={element} aria-hidden="true">
@@ -242,6 +248,7 @@ function DownloadDetails({ job, t, language, busy, connected, resumeRestarts, on
     : staged && job.state !== 'completed' && job.state !== 'removing' ? t('stagedDescription')
       : job.state === 'queued' && !connected ? t('waitingForLogin') : undefined;
   const title = jobTitle(job, t);
+  const fromSavedMessages = job.url.startsWith(savedMessagePrefix);
   const VisibleIcon = job.hidden ? Eye : EyeOff;
 
   async function perform(action: JobAction, discardStaged = false) {
@@ -283,7 +290,10 @@ function DownloadDetails({ job, t, language, busy, connected, resumeRestarts, on
           {showProgress && <TransferProgress job={job} t={t} resumeRestarts={resumeRestarts} />}
           {failure && <p className="dialog-error" role="alert">{failureText(language, failure.code)}</p>}
           <dl className="details-fields">
-            <div><dt>{t('link')}</dt><dd>{job.url}</dd></div>
+            <div>
+              <dt>{t(fromSavedMessages ? 'downloadSource' : 'link')}</dt>
+              <dd>{fromSavedMessages ? t('savedMessages') : job.url}</dd>
+            </div>
             <div><dt>{t(job.outputPath ? 'savedPath' : 'saveTo')}</dt><dd>{job.outputPath || job.folder}</dd></div>
             {job.size > 0 && !showProgress && <div><dt>{t('fileSize')}</dt><dd>{filesize(job.size)}</dd></div>}
           </dl>

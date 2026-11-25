@@ -20,7 +20,7 @@ func (p *telegramProvider) Preview(parent context.Context, link MessageLink,
 	defer release()
 
 	lookup, cancel := context.WithTimeout(ctx, connectDeadline)
-	attachment, err := findTelegramMedia(lookup, client.API(), link)
+	attachment, err := findTelegramMedia(lookup, client, link)
 	cancel()
 	if err != nil {
 		return telegramOperationError(ctx, err)
@@ -45,7 +45,7 @@ func (p *telegramProvider) Preview(parent context.Context, link MessageLink,
 			return n, err
 		}
 
-		updated, err := fetchTelegramMedia(ctx, client.API(), attachment.channel, link, attachment.media.Source)
+		updated, err := fetchTelegramMedia(ctx, client, attachment.channel, link, attachment.media.Source)
 		if err != nil {
 			return 0, err
 		}

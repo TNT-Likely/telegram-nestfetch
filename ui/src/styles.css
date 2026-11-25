@@ -511,6 +511,8 @@ progress::-moz-progress-bar { background: var(--button); border-radius: 6px; }
 .notifications span { display: block; max-width: min(calc(100vw - 2 * var(--inset)), 360px); padding: 7px 11px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); box-shadow: 0 4px 12px var(--shade); font-size: 12px; }
 
 .channel-browser { margin-top: 20px; }
+.saved-attachments-toolbar { display: flex; justify-content: flex-end; }
+.saved-attachments-toolbar svg { width: 14px; height: 14px; }
 .channel-query { display: grid; gap: 11px; padding: 13px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
 .browser-field { display: grid; gap: 4px; min-width: 0; color: var(--muted); font-size: 12px; font-weight: 600; }
 .browser-field input, .browser-field select, .attachment-types select {

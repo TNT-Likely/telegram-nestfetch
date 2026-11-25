@@ -21,6 +21,7 @@ type channelSummary struct {
 
 type channelQuery struct {
 	Channel string `json:"channel"`
+	Saved   bool   `json:"saved,omitempty"`
 	From    int    `json:"from"`
 	To      int    `json:"to"`
 	Before  int    `json:"before"`
@@ -48,16 +49,22 @@ type channelBrowser interface {
 }
 
 func (q *channelQuery) validate() error {
-	selector, err := parseChannelSelector(q.Channel)
-	if err != nil {
-		return err
+	if q.Saved {
+		if q.Channel != "" {
+			return &Failure{Code: "invalid_channel"}
+		}
+	} else {
+		selector, err := parseChannelSelector(q.Channel)
+		if err != nil {
+			return err
+		}
+		q.Channel = selector
 	}
 	// Telegram dates and message IDs are signed 32-bit integers. The CLI uses
 	// the second after the inclusive end of the window as the initial offset.
 	if q.From <= 0 || q.To < q.From || q.To >= math.MaxInt32 || q.Before < 0 || q.Before > math.MaxInt32 {
 		return &Failure{Code: "invalid_date_range"}
 	}
-	q.Channel = selector
 	return nil
 }
 
@@ -73,7 +80,7 @@ func parseChannelSelector(raw string) (string, error) {
 	if strings.HasPrefix(strings.ToLower(raw), "t.me/") {
 		raw = "https://" + raw
 	}
-	if link, err := parseMessageLink(raw); err == nil {
+	if link, err := parseMessageLink(raw); err == nil && link.SavedAccountID == 0 {
 		if link.ChannelID != 0 {
 			return strconv.FormatInt(link.ChannelID, 10), nil
 		}

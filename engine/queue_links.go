@@ -13,11 +13,28 @@ var (
 	digitsPattern   = regexp.MustCompile(`^[0-9]+$`)
 )
 
+const savedMessagePrefix = "nestfetch://saved/"
+
+func savedMessageLink(accountID int64, messageID int) string {
+	return savedMessagePrefix + strconv.FormatInt(accountID, 10) + "/" + strconv.Itoa(messageID)
+}
+
 func parseMessageLink(raw string) (MessageLink, error) {
 	invalid := &Failure{Code: "invalid_link"}
 	raw = strings.TrimSpace(raw)
 	if raw == "" || len(raw) > 2048 {
 		return MessageLink{}, invalid
+	}
+	if path, ok := strings.CutPrefix(raw, savedMessagePrefix); ok {
+		owner, message, _ := strings.Cut(path, "/")
+		accountID, ownerOK := positiveID(owner, 64)
+		messageID, messageOK := positiveID(message, 32)
+		if !ownerOK || !messageOK {
+			return MessageLink{}, invalid
+		}
+		return MessageLink{
+			URL: savedMessageLink(accountID, int(messageID)), SavedAccountID: accountID, MessageID: int(messageID),
+		}, nil
 	}
 	if strings.HasPrefix(strings.ToLower(raw), "t.me/") {
 		raw = "https://" + raw

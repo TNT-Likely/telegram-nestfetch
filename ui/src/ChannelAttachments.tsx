@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
-import { ArrowDownToLine, ChevronDown, Search, Play } from 'lucide-react';
+import { ArrowDownToLine, ChevronDown, Play, RotateCw, Search } from 'lucide-react';
 import { failureOf, imageSource, request, startTask } from './api';
 import type { Attachment, AttachmentQuery, Channel, Failure, MediaKind } from './api';
 import { failureText } from './i18n';
@@ -14,6 +14,7 @@ type LoadState = 'loading' | 'waiting';
 type Stop = () => Promise<void>;
 
 interface Props {
+  saved: boolean;
   t: Translate;
   language: Language;
   busy: boolean;
@@ -42,7 +43,13 @@ function daySeconds(value: string, end = false) {
   return day.getTime() / 1000 - Number(end);
 }
 
-export function ChannelAttachments({ t, language, busy, destination, notification, onPreview, onQueue }: Props) {
+function savedMessagesQuery(): AttachmentQuery {
+  // Telegram history offsets use signed 32-bit Unix timestamps.
+  const to = Math.min(daySeconds(dayInput(), true), 2 ** 31 - 2);
+  return { saved: true, channel: '', from: 1, to };
+}
+
+export function ChannelAttachments({ saved, t, language, busy, destination, notification, onPreview, onQueue }: Props) {
   const [channels, setChannels] = useState<Channel[]>();
   const [channelsState, setChannelsState] = useState<LoadState | 'failed'>();
   const [source, setSource] = useState('');
@@ -65,34 +72,6 @@ export function ChannelAttachments({ t, language, busy, destination, notificatio
   const date = new Intl.DateTimeFormat(language === 'zh' ? 'zh-CN' : 'en', { dateStyle: 'medium' });
 
   useEffect(() => {
-    setChannelsState('loading');
-    const task = startTask(
-      () => request('channels_start', undefined),
-      id => request('channels_status', id),
-      id => request('browse_cancel', id),
-      waiting => setChannelsState(waiting ? 'waiting' : 'loading'),
-    );
-    stopChannels.current = task.stop;
-    void task.result.then(status => {
-      if (stopChannels.current !== task.stop || !status) return;
-      setChannels(status.channels ?? []);
-      setChannelsState(undefined);
-    }).catch(() => {
-      if (stopChannels.current === task.stop) setChannelsState('failed');
-    }).finally(() => {
-      if (stopChannels.current === task.stop) stopChannels.current = undefined;
-      void task.stop();
-    });
-    return () => {
-      stopChannels.current = undefined;
-      void task.stop();
-      const stop = stopPage.current;
-      stopPage.current = undefined;
-      void stop?.();
-    };
-  }, []);
-
-  useEffect(() => {
     if (selectVisible.current) selectVisible.current.indeterminate = visibleSelected > 0 && !allVisibleSelected;
   }, [visibleSelected, allVisibleSelected]);
 
@@ -110,7 +89,7 @@ export function ChannelAttachments({ t, language, busy, destination, notificatio
     setError(undefined);
   }
 
-  function readPage(query: AttachmentQuery, before?: number) {
+  const readPage = useCallback((query: AttachmentQuery, before?: number) => {
     if (stopPage.current) return;
     const stop = stopChannels.current;
     if (stop) {
@@ -148,6 +127,44 @@ export function ChannelAttachments({ t, language, busy, destination, notificatio
       }
       void task.stop();
     });
+  }, []);
+
+  useEffect(() => {
+    if (saved) {
+      readPage(savedMessagesQuery());
+    } else {
+      setChannelsState('loading');
+      const task = startTask(
+        () => request('channels_start', undefined),
+        id => request('channels_status', id),
+        id => request('browse_cancel', id),
+        waiting => setChannelsState(waiting ? 'waiting' : 'loading'),
+      );
+      stopChannels.current = task.stop;
+      void task.result.then(status => {
+        if (stopChannels.current !== task.stop || !status) return;
+        setChannels(status.channels ?? []);
+        setChannelsState(undefined);
+      }).catch(() => {
+        if (stopChannels.current === task.stop) setChannelsState('failed');
+      }).finally(() => {
+        if (stopChannels.current === task.stop) stopChannels.current = undefined;
+        void task.stop();
+      });
+    }
+    return () => {
+      const stopList = stopChannels.current;
+      const stopAttachments = stopPage.current;
+      stopChannels.current = undefined;
+      stopPage.current = undefined;
+      void stopList?.();
+      void stopAttachments?.();
+    };
+  }, [readPage, saved]);
+
+  function refreshSavedMessages() {
+    editQuery();
+    readPage(savedMessagesQuery());
   }
 
   function browse(event: FormEvent<HTMLFormElement>) {
@@ -196,43 +213,52 @@ export function ChannelAttachments({ t, language, busy, destination, notificatio
 
   return (
     <div className="channel-browser">
-      <form className="channel-query" onSubmit={browse} noValidate>
-        <label className="browser-field channel-source">
-          <span>{t('channel')}</span>
-          <select value={manual ? 'manual' : source} onChange={event => { setSource(event.currentTarget.value); editQuery(); }}>
-            <option value="" disabled>{t('chooseChannel')}</option>
-            {channels?.map(channel => (
-              <option key={channel.id} value={channel.id}>{channel.title}{channel.username ? ` (@${channel.username})` : ''}</option>
-            ))}
-            <option value="manual">{t('useChannelLink')}</option>
-          </select>
-        </label>
-        {manual && (
-          <label className="browser-field channel-address">
-            <span>{t('channelLink')}</span>
-            <input type="text" value={channelLink} onChange={event => { setChannelLink(event.currentTarget.value); editQuery(); }} placeholder={t('channelPlaceholder')} maxLength={2048} autoComplete="off" autoCapitalize="off" spellCheck={false} />
-          </label>
-        )}
-        <div className="channel-dates">
-          <label className="browser-field">
-            <span>{t('startDate')}</span>
-            <input type="date" value={fromDay} max={toDay || today} onChange={event => { setFromDay(event.currentTarget.value); editQuery(); }} />
-          </label>
-          <label className="browser-field">
-            <span>{t('endDate')}</span>
-            <input type="date" value={toDay} min={fromDay} max={today} onChange={event => { setToDay(event.currentTarget.value); editQuery(); }} />
-          </label>
-          <button className="primary-button" type="submit" disabled={Boolean(pageState) || busy}><Search aria-hidden="true" />{t('browse')}</button>
+      {saved ? (
+        <div className="saved-attachments-toolbar">
+          <button className="secondary-button" type="button" disabled={Boolean(pageState) || busy} onClick={refreshSavedMessages}>
+            <RotateCw aria-hidden="true" />{t('refreshSavedMessages')}
+          </button>
         </div>
-        {channelsState && (
-          <p className="channel-hint" role="status">
-            {t(channelsState === 'failed' ? 'channelsUnavailable' : channelsState === 'waiting' ? 'browserWaiting' : 'channelsLoading')}
-          </p>
-        )}
-      </form>
-      {error && <p className="form-error" role="alert">{failureText(language, error.code)}</p>}
+      ) : (
+        <form className="channel-query" onSubmit={browse} noValidate>
+          <label className="browser-field channel-source">
+            <span>{t('channel')}</span>
+            <select value={manual ? 'manual' : source} onChange={event => { setSource(event.currentTarget.value); editQuery(); }}>
+              <option value="" disabled>{t('chooseChannel')}</option>
+              {channels?.map(channel => (
+                <option key={channel.id} value={channel.id}>{channel.title}{channel.username ? ` (@${channel.username})` : ''}</option>
+              ))}
+              <option value="manual">{t('useChannelLink')}</option>
+            </select>
+          </label>
+          {manual && (
+            <label className="browser-field channel-address">
+              <span>{t('channelLink')}</span>
+              <input type="text" value={channelLink} onChange={event => { setChannelLink(event.currentTarget.value); editQuery(); }} placeholder={t('channelPlaceholder')} maxLength={2048} autoComplete="off" autoCapitalize="off" spellCheck={false} />
+            </label>
+          )}
+          <div className="channel-dates">
+            <label className="browser-field">
+              <span>{t('startDate')}</span>
+              <input type="date" value={fromDay} max={toDay || today} onChange={event => { setFromDay(event.currentTarget.value); editQuery(); }} />
+            </label>
+            <label className="browser-field">
+              <span>{t('endDate')}</span>
+              <input type="date" value={toDay} min={fromDay} max={today} onChange={event => { setToDay(event.currentTarget.value); editQuery(); }} />
+            </label>
+            <button className="primary-button" type="submit" disabled={Boolean(pageState) || busy}><Search aria-hidden="true" />{t('browse')}</button>
+          </div>
+          {channelsState && (
+            <p className="channel-hint" role="status">
+              {t(channelsState === 'failed' ? 'channelsUnavailable' : channelsState === 'waiting' ? 'browserWaiting' : 'channelsLoading')}
+            </p>
+          )}
+        </form>
+      )}
+      {error && <p className="form-error" role="alert">{saved && error.code === 'browse_unavailable'
+        ? t('savedMessagesUnavailable') : failureText(language, error.code)}</p>}
       {results && (
-        <section className="attachment-results" aria-label={t('channelAttachments')} aria-busy={Boolean(pageState)}>
+        <section className="attachment-results" aria-label={t(saved ? 'savedMessages' : 'channelAttachments')} aria-busy={Boolean(pageState)}>
           <div className="attachment-tools">
             <label className="attachment-check">
               <input ref={selectVisible} type="checkbox" checked={allVisibleSelected} onChange={toggleVisible} disabled={visible.length === 0 || busy || (selected.size === batchLimit && !visibleSelected)} />
@@ -247,7 +273,7 @@ export function ChannelAttachments({ t, language, busy, destination, notificatio
             </label>
           </div>
           {visible.length === 0 && (
-            <p className="channel-empty">{t(category !== 'all' || results.nextBefore ? 'noTypeMatches' : 'noAttachments')}</p>
+            <p className="channel-empty">{t(category !== 'all' || results.nextBefore ? 'noTypeMatches' : saved ? 'savedMessagesEmpty' : 'noAttachments')}</p>
           )}
           {visible.length > 0 && (
             <ul className="attachment-list">
@@ -287,7 +313,7 @@ export function ChannelAttachments({ t, language, busy, destination, notificatio
       )}
       {pageState && (
         <div className="browse-progress">
-          <p role="status">{t(pageState === 'waiting' ? 'browserWaiting' : 'attachmentsLoading')}</p>
+          <p role="status">{t(pageState === 'waiting' ? 'browserWaiting' : saved ? 'savedMessagesLoading' : 'attachmentsLoading')}</p>
           <button className="secondary-button" type="button" onClick={cancelPage}>{t('cancel')}</button>
         </div>
       )}
