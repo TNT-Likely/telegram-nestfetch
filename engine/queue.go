@@ -454,6 +454,18 @@ func (q *queue) enqueueLinks(links []MessageLink) ([]string, int, error) {
 	return ids, duplicates, nil
 }
 
+func (q *queue) hasActiveOrSavedURLLocked(rawURL string) bool {
+	for _, job := range q.state.Jobs {
+		if job.URL != rawURL {
+			continue
+		}
+		if job.State != completed || (job.Folder == q.state.Folder && fileExists(job.OutputPath)) {
+			return true
+		}
+	}
+	return false
+}
+
 func (q *queue) pause(id string) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()

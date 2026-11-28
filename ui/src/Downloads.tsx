@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import type { RefObject } from 'react';
 import { ArrowDown, CircleCheck, Ellipsis, Eye, EyeOff, FolderOpen, HardDriveDownload, Pause, Play, RotateCcw, X } from 'lucide-react';
 import { imageSource, request } from './api';
 import type { Failure, Job } from './api';
@@ -126,15 +127,16 @@ function DetailsButton({ job, t, busy, onDetails, className }: Pick<JobProps, 'j
   );
 }
 
-function FeaturedJob({ job, t, resumeRestarts, busy, onAction, onDetails }: JobProps) {
+function FeaturedJob({ job, t, resumeRestarts, busy, onAction, onDetails, articleRef }: JobProps & { articleRef: RefObject<HTMLElement | null> }) {
   const { element, cover } = useCover(job.id, job.hasThumbnail);
+  const titleId = useId();
   const seconds = duration(job.duration);
   const title = jobTitle(job, t);
   const source = jobSource(job, t);
   const action = job.state === 'paused' ? 'resume' : canPause.has(job.state) ? 'pause' : null;
   const ActionIcon = action === 'resume' ? Play : Pause;
   return (
-    <article className="feature" data-state={job.state} aria-labelledby="featured-title">
+    <article ref={articleRef} className="feature" data-state={job.state} aria-labelledby={titleId}>
       <div className="feature-still" ref={element}>
         <MediaArtwork cover={cover} kind={job.kind} />
         <div className="feature-top">
@@ -143,7 +145,7 @@ function FeaturedJob({ job, t, resumeRestarts, busy, onAction, onDetails }: JobP
         </div>
         <div className="feature-caption">
           <div className="feature-label">
-            <h2 id="featured-title" title={title}>{title}</h2>
+            <h2 id={titleId} title={title}>{title}</h2>
             {source && <span title={source}>{source}</span>}
           </div>
           <div className="feature-actions">
@@ -329,6 +331,8 @@ export function Downloads({ jobs, view, loading, ...props }: DownloadsProps) {
   const { t } = props;
   const [showHidden, setShowHidden] = useState(false);
   const [detailsId, setDetailsId] = useState<string>();
+  const featureSlot = useRef<HTMLDivElement>(null);
+  const featuredNode = useRef<HTMLElement>(null);
   const visible = jobs.filter(job => inView(job, view, showHidden));
   const details = jobs.find(job => job.id === detailsId);
   const rowProps = { ...props, onDetails: setDetailsId };
@@ -336,6 +340,16 @@ export function Downloads({ jobs, view, loading, ...props }: DownloadsProps) {
     ?? visible.find(job => job.state === 'paused' && job.size > 0);
   const rows = visible.filter(job => job !== featured);
   const emptyTitle = loading ? t('loading') : view === 'completed' ? t('emptyCompleted') : view === 'active' ? t('emptyActive') : t('empty');
+
+  useLayoutEffect(() => {
+    const slot = featureSlot.current;
+    if (!slot) return;
+    const expected = featured ? featuredNode.current : null;
+    for (const child of Array.from(slot.children)) {
+      if (child !== expected) child.remove();
+    }
+  });
+
   return (
     <section className="downloads" aria-label={t('queue')} aria-busy={loading}>
       {view === 'completed' && jobs.some(job => job.hidden) && (
@@ -343,7 +357,9 @@ export function Downloads({ jobs, view, loading, ...props }: DownloadsProps) {
           <label><input type="checkbox" checked={showHidden} onChange={event => setShowHidden(event.currentTarget.checked)} />{t('showHidden')}</label>
         </div>
       )}
-      {featured && <FeaturedJob key={featured.id} job={featured} {...rowProps} />}
+      <div className="feature-slot" ref={featureSlot} data-has-featured={Boolean(featured)}>
+        {featured && <FeaturedJob key={featured.id} job={featured} articleRef={featuredNode} {...rowProps} />}
+      </div>
       {rows.length > 0 && (
         <ul className="download-list">
           {rows.map(job => <DownloadRow key={job.id} job={job} {...rowProps} />)}

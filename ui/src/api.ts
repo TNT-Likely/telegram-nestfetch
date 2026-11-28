@@ -78,6 +78,18 @@ export interface Attachment {
   thumbnail?: string;
 }
 
+export interface LinkPreview {
+  url: string;
+  title: string;
+  name: string;
+  source?: string;
+  kind: MediaKind;
+  size: number;
+  duration: number;
+  thumbnail?: string;
+  duplicate?: boolean;
+}
+
 export interface AttachmentQuery {
   channel: string;
   from: number;
@@ -123,6 +135,8 @@ interface EngineMethods {
   channels_status: [TaskReference, TaskStatus<{ channels: Channel[] }>];
   attachments_start: [AttachmentQuery & { before?: number }, TaskReference];
   attachments_status: [TaskReference, TaskStatus<{ items: Attachment[]; nextBefore?: number }>];
+  inspect_start: [{ url: string }, TaskReference];
+  inspect_status: [TaskReference, TaskStatus<{ preview?: LinkPreview }>];
   browse_cancel: [TaskReference, null];
   preview_start: [{ url: string }, TaskReference];
   local_preview_start: [{ id: string }, TaskReference];

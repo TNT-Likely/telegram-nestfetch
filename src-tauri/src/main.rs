@@ -43,6 +43,8 @@ async fn engine_request(
         | "channels_status"
         | "attachments_start"
         | "attachments_status"
+        | "inspect_start"
+        | "inspect_status"
         | "browse_cancel"
         | "preview_start"
         | "local_preview_start"

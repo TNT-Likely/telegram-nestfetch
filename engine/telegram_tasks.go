@@ -3,6 +3,8 @@ package main
 
 import (
 	"context"
+	"math"
+	"strings"
 	"time"
 )
 
@@ -13,12 +15,25 @@ type telegramPreviewer interface {
 	Preview(context.Context, MessageLink, func(string), func(int64, time.Duration)) error
 }
 
+type linkPreview struct {
+	URL       string    `json:"url"`
+	Title     string    `json:"title"`
+	Name      string    `json:"name"`
+	Source    string    `json:"source,omitempty"`
+	Kind      MediaKind `json:"kind"`
+	Size      int64     `json:"size"`
+	Duration  float64   `json:"duration"`
+	Thumbnail string    `json:"thumbnail,omitempty"`
+	Duplicate bool      `json:"duplicate,omitempty"`
+}
+
 type taskStatus struct {
 	State           string              `json:"state"`
 	Waiting         bool                `json:"waiting,omitempty"`
 	Channels        []channelSummary    `json:"channels,omitempty"`
 	Items           []channelAttachment `json:"items,omitempty"`
 	NextBefore      int                 `json:"nextBefore,omitempty"`
+	Preview         *linkPreview        `json:"preview,omitempty"`
 	URL             string              `json:"url,omitempty"`
 	BytesRead       int64               `json:"bytesRead,omitempty"`
 	Speed           int64               `json:"speed,omitempty"`
@@ -71,6 +86,55 @@ func (q *queue) startAttachmentList(filter channelQuery) (string, error) {
 			err = telegramFailure("telegram_network")
 		}
 		return taskStatus{Items: page.Items, NextBefore: page.NextBefore}, err
+	})
+}
+
+func (q *queue) startInspect(rawURL string) (string, error) {
+	link, err := parseMessageLink(rawURL)
+	if err != nil {
+		return "", err
+	}
+	return q.startTelegramTask("inspect", func(ctx context.Context, _ updateTask) (taskStatus, error) {
+		read, cancel := context.WithTimeout(ctx, browseTimeout)
+		defer cancel()
+		media, err := q.telegram.Inspect(read, link)
+		if read.Err() == context.DeadlineExceeded {
+			err = telegramFailure("telegram_network")
+		}
+		if err != nil {
+			return taskStatus{}, err
+		}
+		if media.ID == 0 || media.Bytes <= 0 {
+			return taskStatus{}, &Failure{Code: "no_media"}
+		}
+		duration := media.Duration
+		if math.IsNaN(duration) || math.IsInf(duration, 0) || duration < 0 {
+			duration = 0
+		}
+		kind := media.Kind
+		if kind == "" {
+			kind = MediaFile
+		}
+		thumbnail := ""
+		if !media.HideThumbnail && validThumbnail(media.Thumbnail) {
+			thumbnail = media.Thumbnail
+		}
+		q.mu.Lock()
+		duplicate := q.hasActiveOrSavedURLLocked(link.URL)
+		q.mu.Unlock()
+		return taskStatus{
+			Preview: &linkPreview{
+				URL:       link.URL,
+				Title:     strings.TrimSpace(media.Title),
+				Name:      filename(media.Name),
+				Source:    media.Source,
+				Kind:      kind,
+				Size:      media.Bytes,
+				Duration:  duration,
+				Thumbnail: thumbnail,
+				Duplicate: duplicate,
+			},
+		}, nil
 	})
 }
 

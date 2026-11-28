@@ -169,3 +169,66 @@ func TestPreviewCancellationReleasesQueuedDownloads(t *testing.T) {
 		t.Fatalf("queued download did not save after playback closed: %+v", complete)
 	}
 }
+
+func TestInspectReturnsLinkMetadataAndDuplicateStatus(t *testing.T) {
+	backend := fakeTelegram("connected")
+	q, err := openQueue(context.Background(), t.TempDir(), t.TempDir(), "", backend)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer q.close()
+
+	if _, err := q.startInspect("https://example.com/not-telegram"); err == nil {
+		t.Fatal("expected invalid_link error")
+	} else {
+		expectCode(t, err, "invalid_link")
+	}
+
+	readInspect := func(raw string) *linkPreview {
+		t.Helper()
+		id, err := q.startInspect(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		deadline := time.Now().Add(4 * time.Second)
+		for {
+			status, err := q.mediaTaskStatus("inspect", id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if status.State == "ready" {
+				q.cancelTelegramTask(id, false)
+				return status.Preview
+			}
+			if status.State == "failed" || time.Now().After(deadline) {
+				t.Fatalf("inspect did not succeed: %+v", status)
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+
+	preview := readInspect(mediaURL + "?single")
+	if preview == nil || preview.URL != mediaURL || preview.Name != "clip.mp4" || preview.Title != "Clip" ||
+		preview.Source != "@sample" || preview.Kind != MediaVideo || preview.Size != int64(len(videoA)) ||
+		preview.Duration != 6.5 || preview.Thumbnail != jpeg || preview.Duplicate {
+		t.Fatalf("unexpected inspect preview: %+v", preview)
+	}
+
+	job, err := q.enqueue(mediaURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectState(t, q, job, completed)
+
+	duplicate := readInspect(mediaURL)
+	if duplicate == nil || !duplicate.Duplicate {
+		t.Fatalf("expected duplicate flag for already downloaded message: %+v", duplicate)
+	}
+
+	backend.setAccount("disconnected")
+	if _, err := q.startInspect(mediaURL); err == nil {
+		t.Fatal("expected login_required error when disconnected")
+	} else {
+		expectCode(t, err, "login_required")
+	}
+}

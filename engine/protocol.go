@@ -114,7 +114,7 @@ func dispatch(ctx context.Context, q *queue, message request) (any, error) {
 		return q.enqueue(args.URL)
 	case "enqueue_batch":
 		return q.enqueueBatch(args.URLs)
-	case "channels_start", "attachments_start", "preview_start", "local_preview_start":
+	case "channels_start", "attachments_start", "inspect_start", "preview_start", "local_preview_start":
 		var id string
 		var err error
 		switch message.Method {
@@ -122,6 +122,8 @@ func dispatch(ctx context.Context, q *queue, message request) (any, error) {
 			id, err = q.startChannelList()
 		case "attachments_start":
 			id, err = q.startAttachmentList(args.channelQuery)
+		case "inspect_start":
+			id, err = q.startInspect(args.URL)
 		case "preview_start":
 			id, err = q.startPreview(args.URL)
 		case "local_preview_start":
@@ -132,6 +134,8 @@ func dispatch(ctx context.Context, q *queue, message request) (any, error) {
 		return q.mediaTaskStatus("channels", args.ID)
 	case "attachments_status":
 		return q.mediaTaskStatus("attachments", args.ID)
+	case "inspect_status":
+		return q.mediaTaskStatus("inspect", args.ID)
 	case "preview_status":
 		return q.mediaTaskStatus("preview", args.ID)
 	case "browse_cancel", "preview_stop":

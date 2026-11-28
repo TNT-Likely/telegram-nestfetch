@@ -1,15 +1,16 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
-import { ArrowDownToLine, Bookmark, ChevronDown, ChevronRight, CircleCheck, Folder, Layers, Library, Link2, Monitor, Moon, Play, Send, Settings, Sun, X } from 'lucide-react';
+import { ArrowDownToLine, Bookmark, ChevronDown, ChevronRight, CircleCheck, Eye, Folder, Layers, Library, Link2, LoaderCircle, Monitor, Moon, Play, Send, Settings, Sun, X } from 'lucide-react';
 import { AccountDialog } from './AccountDialog';
 import { ChannelAttachments } from './ChannelAttachments';
 import { countByView, Downloads } from './Downloads';
 import type { JobAction, JobActionOptions, View } from './Downloads';
+import { duration, filesize, MediaArtwork } from './MediaArtwork';
 import { SettingsDialog } from './SettingsDialog';
 import { VideoPreview } from './VideoPreview';
 import type { PreviewTarget, TelegramPreviewTarget } from './VideoPreview';
-import { chooseFolder, failureOf, openProjectRepository, openTelegramSettings, request, revealJob, setWindowTheme } from './api';
-import type { Account, BatchResult, Failure, Job, Snapshot, Theme } from './api';
+import { chooseFolder, failureOf, imageSource, openProjectRepository, openTelegramSettings, request, revealJob, setWindowTheme, startTask } from './api';
+import type { Account, BatchResult, Failure, Job, LinkPreview, Snapshot, Theme } from './api';
 import { failureText, translator } from './i18n';
 import type { Language, Translate } from './i18n';
 import githubMark from './github-mark.svg?no-inline';
@@ -27,7 +28,44 @@ const filters = [
 ] as const;
 const signingIn = new Set<Account['state']>(['starting', 'qr', 'password']);
 const running = new Set<Job['state']>(['queued', 'resolving', 'downloading', 'saving']);
+const reservedTelegramUsernames = new Set([
+  'addemoji', 'addlist', 'addstickers', 'addtheme', 'boost', 'c', 'contact',
+  'giftcode', 'invoice', 'joinchat', 'login', 'm', 'msg', 'nft', 'proxy', 's',
+  'setlanguage', 'share', 'socks',
+]);
 type WorkspaceView = View | 'channels' | 'saved';
+type LinkInspection =
+  | { url: string; state: 'loading'; waiting: boolean }
+  | { url: string; state: 'ready'; preview: LinkPreview }
+  | { url: string; state: 'failed'; error: Failure };
+
+function looksLikeTelegramLink(raw: string) {
+  const trimmed = raw.trim();
+  if (!trimmed || trimmed.length > 2048) return false;
+  const candidate = /^t\.me\//i.test(trimmed) ? `https://${trimmed}` : trimmed;
+  let parsed: URL;
+  try {
+    parsed = new URL(candidate);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== 'https:' || parsed.hostname.toLowerCase() !== 't.me' || parsed.username || parsed.password || parsed.hash) {
+    return false;
+  }
+  for (const key of parsed.searchParams.keys()) {
+    if (key !== 'single' && key !== 't' && key !== 'thread') return false;
+  }
+  const parts = parsed.pathname.replace(/^\/+|\/+$/g, '').split('/').filter(Boolean);
+  if (parts[0] === 'c') {
+    return (parts.length === 3 || parts.length === 4) && parts.slice(1).every(part => /^\d+$/.test(part) && Number(part) > 0);
+  }
+  const offset = parts[0] === 's' ? 1 : 0;
+  const rest = parts.slice(offset);
+  if (rest.length !== 2 && rest.length !== 3) return false;
+  const username = rest[0].toLowerCase();
+  if (!/^[a-z0-9_]{1,32}$/.test(username) || reservedTelegramUsernames.has(username)) return false;
+  return rest.slice(1).every(part => /^\d+$/.test(part) && Number(part) > 0);
+}
 
 interface Preferences {
   language: Language;
@@ -206,9 +244,82 @@ export function App() {
   const [accountError, setAccountError] = useState<Failure>();
   const [notice, setNotice] = useState<'added' | 'folderChanged' | 'downloadHidden' | 'downloadRestored' | 'downloadRemoved' | BatchResult>();
   const [preview, setPreview] = useState<PreviewTarget>();
+  const [inspection, setInspection] = useState<LinkInspection>();
   const input = useRef<HTMLInputElement>(null);
   const actionLock = useRef(false);
   const loginRequested = useRef(false);
+  const stopInspect = useRef<(() => Promise<void>) | undefined>(undefined);
+  const inspectNonce = useRef(0);
+  const inspectedUrl = useRef('');
+  const dismissedUrl = useRef('');
+
+  const cancelInspect = useCallback((clear = true) => {
+    inspectNonce.current++;
+    const stop = stopInspect.current;
+    stopInspect.current = undefined;
+    void stop?.();
+    if (clear) {
+      inspectedUrl.current = '';
+      setInspection(undefined);
+    }
+  }, []);
+
+  const beginInspect = useCallback((rawUrl: string) => {
+    const trimmed = rawUrl.trim();
+    if (!trimmed) {
+      setLinkError({ code: 'invalid_link' });
+      input.current?.focus();
+      return;
+    }
+    dismissedUrl.current = '';
+    cancelInspect(false);
+    const nonce = inspectNonce.current;
+    inspectedUrl.current = trimmed;
+    setLinkError(undefined);
+    setInspection({ url: trimmed, state: 'loading', waiting: false });
+    const task = startTask(
+      () => request('inspect_start', { url: trimmed }),
+      id => request('inspect_status', id),
+      id => request('browse_cancel', id),
+      waiting => {
+        if (inspectNonce.current !== nonce) return;
+        setInspection(current => current?.state === 'loading' && current.url === trimmed ? { ...current, waiting } : current);
+      },
+    );
+    stopInspect.current = task.stop;
+    void task.result.then(status => {
+      if (inspectNonce.current !== nonce || !status?.preview) return;
+      setInspection({ url: trimmed, state: 'ready', preview: status.preview });
+    }).catch(error => {
+      if (inspectNonce.current !== nonce) return;
+      const failure = failureOf(error);
+      if (failure.code === 'invalid_link') {
+        inspectedUrl.current = '';
+        setInspection(undefined);
+        setLinkError(failure);
+      } else {
+        setInspection({ url: trimmed, state: 'failed', error: failure });
+      }
+    }).finally(() => {
+      if (stopInspect.current === task.stop) stopInspect.current = undefined;
+      void task.stop();
+    });
+  }, [cancelInspect]);
+
+  const connected = snapshot?.account.state === 'connected';
+  useEffect(() => {
+    const trimmed = link.trim();
+    if (browsingAttachments || !connected || !trimmed || !looksLikeTelegramLink(trimmed)) {
+      if (inspectedUrl.current && inspectedUrl.current !== trimmed) cancelInspect(true);
+      else if (browsingAttachments || !connected || !trimmed) cancelInspect(true);
+      return;
+    }
+    if (inspectedUrl.current === trimmed || dismissedUrl.current === trimmed) return;
+    const timer = window.setTimeout(() => { beginInspect(trimmed); }, 220);
+    return () => window.clearTimeout(timer);
+  }, [link, connected, browsingAttachments, beginInspect, cancelInspect]);
+
+  useEffect(() => () => { cancelInspect(false); }, [cancelInspect]);
 
   useEffect(() => {
     if (!notice) return;
@@ -275,29 +386,60 @@ export function App() {
     }
   }
 
-  async function addDownload(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const submitted = link;
-    if (!submitted.trim()) {
+  async function enqueueLink(rawUrl: string) {
+    const trimmed = rawUrl.trim();
+    if (!trimmed) {
       setLinkError({ code: 'invalid_link' });
       input.current?.focus();
       return;
     }
-    const succeeded = await run(async () => { await request('enqueue', { url: submitted.trim() }); }, setLinkError);
+    cancelInspect(true);
+    const succeeded = await run(async () => { await request('enqueue', { url: trimmed }); }, setLinkError);
     if (!succeeded) {
       input.current?.focus();
       return;
     }
-    setLink(current => current === submitted ? '' : current);
+    dismissedUrl.current = '';
+    setLink(current => current.trim() === trimmed ? '' : current);
     setView('all');
     setNotice('added');
     if (snapshot && snapshot.account.state !== 'connected') openAccount();
     else input.current?.focus();
   }
 
+  async function addDownload(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const trimmed = link.trim();
+    if (!trimmed) {
+      setLinkError({ code: 'invalid_link' });
+      input.current?.focus();
+      return;
+    }
+    if (!connected) {
+      await enqueueLink(trimmed);
+      return;
+    }
+    if (inspection?.url === trimmed && inspection.state === 'ready') {
+      const alreadyQueued = Boolean(inspection.preview.duplicate) || jobs.some(job =>
+        job.url === inspection.preview.url && job.state !== 'completed');
+      if (alreadyQueued) {
+        setLinkError({ code: 'duplicate' });
+        return;
+      }
+      await enqueueLink(trimmed);
+      return;
+    }
+    if (inspection?.url === trimmed && inspection.state === 'loading') return;
+    beginInspect(trimmed);
+  }
+
   function openPreview(target: TelegramPreviewTarget) {
-    if (snapshot?.account.state === 'connected') setPreview(target);
-    else openAccount();
+    if (snapshot?.account.state === 'connected') {
+      if (inspection?.state === 'loading') cancelInspect(true);
+      setPreview(target);
+    } else {
+      openAccount();
+    }
   }
 
   function playDownload(job: Job, thumbnail: string | undefined) {
@@ -309,6 +451,8 @@ export function App() {
     const succeeded = await run(async () => { await request('enqueue', { url }); }, failure => { issue = failure; });
     if (!succeeded) return issue ?? { code: 'busy' };
     if (!browsingAttachments) {
+      cancelInspect(true);
+      dismissedUrl.current = '';
       setView('all');
       setLink(current => current.trim() === url ? '' : current);
     }
@@ -351,6 +495,17 @@ export function App() {
 
   const jobs = snapshot?.jobs ?? [];
   const account = snapshot?.account;
+  const trimmedLink = link.trim();
+  const activeInspection = inspection && inspection.url === trimmedLink ? inspection : undefined;
+  const inspectedPreview = activeInspection?.state === 'ready' ? activeInspection.preview : undefined;
+  const inspectedDuplicate = Boolean(inspectedPreview && (inspectedPreview.duplicate || jobs.some(job =>
+    job.url === inspectedPreview.url && job.state !== 'completed')));
+  const inspectedDuration = inspectedPreview ? duration(inspectedPreview.duration) : null;
+  const inspectedTitle = inspectedPreview ? (inspectedPreview.title || inspectedPreview.name || t('telegramAttachment')) : '';
+  const inspectedMeta = inspectedPreview
+    ? [t(inspectedPreview.kind), filesize(inspectedPreview.size), inspectedPreview.source].filter(Boolean).join(' · ')
+    : '';
+  const canConfirmPreview = Boolean(inspectedPreview && !inspectedDuplicate);
   const needsSetup = account?.state === 'setup' && account.backend !== 'tdl';
   const folder = snapshot?.settings.folder;
   const leaf = folder?.replace(/[/\\]+$/, '').split(/[/\\]/).pop();
@@ -404,7 +559,12 @@ export function App() {
                 ref={input}
                 type="text"
                 value={link}
-                onChange={event => { setLink(event.currentTarget.value); setLinkError(undefined); }}
+                onChange={event => {
+                  const next = event.currentTarget.value;
+                  if (dismissedUrl.current && dismissedUrl.current !== next.trim()) dismissedUrl.current = '';
+                  setLink(next);
+                  setLinkError(undefined);
+                }}
                 placeholder={t(compact ? 'linkShort' : 'linkPlaceholder')}
                 aria-label={t('link')}
                 aria-invalid={linkError?.code === 'invalid_link'}
@@ -414,14 +574,92 @@ export function App() {
                 autoCapitalize="off"
                 spellCheck={false}
               />
-              <button className="preview-button row-action" type="button" aria-label={t('preview')} title={t('preview')} aria-haspopup="dialog" disabled={busy || !snapshot || !link.trim()} onClick={() => openPreview({ url: link.trim() })}>
+              <button className="preview-button row-action" type="button" aria-label={t('preview')} title={t('preview')} aria-haspopup="dialog" disabled={busy || !snapshot || !trimmedLink} onClick={() => openPreview({
+                url: trimmedLink,
+                name: inspectedPreview ? inspectedTitle : undefined,
+                thumbnail: inspectedPreview?.thumbnail,
+              })}>
                 <Play aria-hidden="true" /><span>{t('preview')}</span>
               </button>
-              <button className="primary-button download-button" type="submit" disabled={busy || !snapshot}>
-                <ArrowDownToLine aria-hidden="true" /><span>{t('download')}</span>
+              <button className="primary-button download-button" type="submit" disabled={busy || !snapshot || activeInspection?.state === 'loading' || (Boolean(inspectedPreview) && inspectedDuplicate)}>
+                {connected && !inspectedPreview ? <Eye aria-hidden="true" /> : <ArrowDownToLine aria-hidden="true" />}
+                <span>{t(!connected ? 'download' : inspectedPreview ? 'confirmDownload' : 'inspectLink')}</span>
               </button>
             </div>
             {linkError && <p className="form-error" id="link-error" role="alert">{failureText(preferences.language, linkError.code)}</p>}
+            {activeInspection && (
+              <div className="link-preview" role="region" aria-label={t('inspectReady')} aria-busy={activeInspection.state === 'loading'}>
+                {activeInspection.state === 'loading' ? (
+                  <>
+                    <div className="link-preview-status" role="status">
+                      <LoaderCircle className="spin" aria-hidden="true" />
+                      <span>{t(activeInspection.waiting ? 'browserWaiting' : 'inspectLoading')}</span>
+                    </div>
+                    <div className="link-preview-actions">
+                      {activeInspection.waiting && (
+                        <button type="button" className="secondary-button" disabled={busy} onClick={() => { void enqueueLink(activeInspection.url); }}>
+                          {t('downloadDirectly')}
+                        </button>
+                      )}
+                      <button type="button" className="secondary-button" onClick={() => {
+                        dismissedUrl.current = activeInspection.url;
+                        cancelInspect(true);
+                      }}>{t('cancel')}</button>
+                    </div>
+                  </>
+                ) : activeInspection.state === 'failed' ? (
+                  <>
+                    <p className="link-preview-error" role="alert">{failureText(preferences.language, activeInspection.error.code)}</p>
+                    <div className="link-preview-actions">
+                      {(activeInspection.error.code === 'telegram_network' || activeInspection.error.code === 'telegram_rate_limited') && (
+                        <button type="button" className="secondary-button" disabled={busy} onClick={() => { void enqueueLink(activeInspection.url); }}>
+                          {t('downloadDirectly')}
+                        </button>
+                      )}
+                      <button type="button" className="secondary-button" disabled={busy} onClick={() => beginInspect(activeInspection.url)}>{t('refresh')}</button>
+                      <button type="button" className="icon-button" aria-label={t('close')} onClick={() => {
+                        dismissedUrl.current = activeInspection.url;
+                        cancelInspect(true);
+                      }}><X aria-hidden="true" /></button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="link-preview-media">
+                      <div className="thumb" aria-hidden="true">
+                        <MediaArtwork cover={imageSource(activeInspection.preview.thumbnail)} kind={activeInspection.preview.kind} />
+                        {inspectedDuration && <span className="duration">{inspectedDuration}</span>}
+                      </div>
+                      <div className="link-preview-body">
+                        <h2 title={inspectedTitle}>{inspectedTitle}</h2>
+                        <div className="link-preview-meta">
+                          <span>{inspectedMeta}</span>
+                          {inspectedDuplicate && <><span aria-hidden="true">·</span><span className="link-preview-duplicate">{t('alreadyInDownloads')}</span></>}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="link-preview-actions">
+                      {activeInspection.preview.kind === 'video' && (
+                        <button type="button" className="row-action" aria-haspopup="dialog" disabled={busy} onClick={() => openPreview({
+                          url: activeInspection.url,
+                          name: inspectedTitle,
+                          thumbnail: activeInspection.preview.thumbnail,
+                        })}>
+                          <Play aria-hidden="true" /><span>{t('preview')}</span>
+                        </button>
+                      )}
+                      <button type="button" className="primary-button" disabled={busy || !canConfirmPreview} onClick={() => { void enqueueLink(activeInspection.url); }}>
+                        <ArrowDownToLine aria-hidden="true" /><span>{t('confirmDownload')}</span>
+                      </button>
+                      <button type="button" className="icon-button" aria-label={t('close')} onClick={() => {
+                        dismissedUrl.current = activeInspection.url;
+                        cancelInspect(true);
+                      }}><X aria-hidden="true" /></button>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
             {destination}
           </form>}
           {displayedError && (
